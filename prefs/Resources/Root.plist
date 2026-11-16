@@ -8,7 +8,7 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>footerText</key>
-			<string>Mặc định là Lớp phủ ổn định. "Thay switcher thật" còn thử nghiệm: nếu SpringBoard crash, tweak tự quay về Lớp phủ. Đổi chế độ xong bấm Respring.</string>
+			<string>Đổi Chế độ xong bấm Respring. "Thay switcher thật" áp dụng thẳng lên switcher của iOS (thử nghiệm). Nếu SpringBoard crash, tweak tự tắt để tránh safe mode. "Dò và ghi log" dùng để gửi log cho lập trình viên.</string>
 			<key>label</key>
 			<string>Áp dụng</string>
 		</dict>
@@ -55,9 +55,9 @@
 			<string>Chế độ</string>
 			<key>validTitles</key>
 			<array>
-				<string>Thay switcher thật (thử nghiệm, có thể crash)</string>
-				<string>Tắt (không làm gì)</string>
-				<string>Lớp phủ (ổn định, mặc định)</string>
+				<string>Thay switcher thật (thử nghiệm)</string>
+				<string>Dò và ghi log (an toàn)</string>
+				<string>Lớp phủ (cũ, ổn định)</string>
 			</array>
 			<key>validValues</key>
 			<array>
