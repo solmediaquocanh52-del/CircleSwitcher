@@ -6,7 +6,7 @@ include $(THEOS)/makefiles/common.mk
 BUNDLE_NAME = CircleSwitcherPrefs
 
 CircleSwitcherPrefs_FILES = CSRootListController.m
-CircleSwitcherPrefs_FRAMEWORKS = UIKit
+CircleSwitcherPrefs_FRAMEWORKS = UIKit QuartzCore
 CircleSwitcherPrefs_INSTALL_PATH = /Library/PreferenceBundles
 CircleSwitcherPrefs_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-error
 CircleSwitcherPrefs_LDFLAGS = -undefined dynamic_lookup
