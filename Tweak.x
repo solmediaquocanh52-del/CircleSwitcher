@@ -1173,7 +1173,14 @@ static NSString *csChain(Class k) {
 static void csProbeArrayCall(id o, NSString *tag, NSArray<NSString *> *sels) {
     for (NSString *n in sels) {
         SEL sl = NSSelectorFromString(n);
-        if (![o respondsToSelector:sl]) continue;
+        if (!o || [n hasPrefix:@"_"] || ![o respondsToSelector:sl]) continue;
+        Method mt = class_getInstanceMethod([o class], sl);
+        if (!mt) { csLog(@"  %@.%@ skipped (no method)", tag, n); continue; }
+        char *rt = method_copyReturnType(mt);
+        BOOL isObj = rt && rt[0] == '@';
+        free(rt);
+        if (!isObj) { csLog(@"  %@.%@ skipped (returns non-object)", tag, n); continue; }
+        csLog(@"  calling %@.%@", tag, n);
         id r = nil;
         @try { r = ((id (*)(id, SEL))objc_msgSend)(o, sl); } @catch (NSException *e) { continue; }
         NSString *d = r ? NSStringFromClass([r class]) : @"nil";
@@ -1223,7 +1230,7 @@ static void csStaticDump(void) {
     }
     free(all);
     csLog(@"switcher-ish classes (%lu): %@", (unsigned long)mods.count, [mods componentsJoinedByString:@" "]);
-    NSArray *cands = @[@"recents", @"recentAppLayouts", @"_recentAppLayouts", @"appLayouts", @"allAppLayouts", @"layouts", @"recentAppLayoutsForSwitcher"];
+    NSArray *cands = @[@"recents", @"recentAppLayouts", @"appLayouts", @"allAppLayouts"];
     id ral = send0((id)NSClassFromString(@"SBRecentAppLayouts"), @"sharedInstance");
     csLog(@"SBRecentAppLayouts sharedInstance=%@", ral ? NSStringFromClass([ral class]) : @"nil");
     csProbeArrayCall(ral, @"SBRecentAppLayouts", cands);
@@ -1448,6 +1455,16 @@ static void csRespringNote(CFNotificationCenterRef c, void *o, CFStringRef n, co
     loadCfg();
     csLog(@"CircleSwitcher loaded in %@", NSBundle.mainBundle.bundleIdentifier);
     if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.apple.springboard"]) return;
+    if (prefDouble(CFSTR("modeVer"), 0) < 2) {
+        // ban cu luu mode=0 (Lop phu). Tu v1.1 so 0 la "Thay that" -> dat lai an toan mot lan
+        int m = 1, ver = 2;
+        CFNumberRef a = CFNumberCreate(NULL, kCFNumberIntType, &m), b = CFNumberCreate(NULL, kCFNumberIntType, &ver);
+        CFPreferencesSetAppValue(CFSTR("mode"), a, CS_DOMAIN); CFPreferencesSetAppValue(CFSTR("modeVer"), b, CS_DOMAIN);
+        CFRelease(a); CFRelease(b);
+        CFPreferencesAppSynchronize(CS_DOMAIN);
+        loadCfg();
+        csLog(@"migrated: mode reset to 1 (safe), modeVer=2");
+    }
     if ([NSFileManager.defaultManager fileExistsAtPath:CS_MARKER]) {
         csTripped = YES;
         [NSFileManager.defaultManager removeItemAtPath:CS_MARKER error:nil];
