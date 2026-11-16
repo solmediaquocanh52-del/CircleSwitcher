@@ -1086,92 +1086,6 @@ static void csDiscoverOnce(void) {
     }
 }
 
-#pragma mark - real switcher (hook the stock cards)
-
-@interface SBFluidSwitcherItemContainer : UIView
-@end
-@interface SBFluidSwitcherViewController : UIViewController
-@end
-
-static const void *kSysC = &kSysC, *kSysT = &kSysT, *kSysA = &kSysA, *kApplied = &kApplied;
-static __weak UIViewController *csFluid;
-static int csCnt[6]; // setCenter, setTransform, setAlpha, setFrame, layoutSubviews, applied
-#define CS_MARKER @"/var/mobile/Documents/CircleSwitcher.armed"
-static BOOL csTripped, csMarkerOn;
-static double csLastApply;
-
-// Dat the app that thanh vong 3D, dua tren vi tri he thong dat (de tu khop voi cuon/vuot/dong app).
-static void csApplyRingInner(UIView *c) {
-    if (!C.enabled || C.mode != 0) return;
-    NSValue *vc = objc_getAssociatedObject(c, kSysC);
-    UIView *sv = c.superview;
-    if (!vc || !sv || !c.window) return;
-    if (csTripped || -[csBoot timeIntervalSinceNow] < 12) return;
-    CGPoint sys = vc.CGPointValue;
-    if (!isfinite(sys.x) || !isfinite(sys.y)) return;
-    NSValue *vt = objc_getAssociatedObject(c, kSysT);
-    CGAffineTransform st = vt ? vt.CGAffineTransformValue : CGAffineTransformIdentity;
-    NSNumber *na = objc_getAssociatedObject(c, kSysA);
-    double sa = na ? na.doubleValue : 1.0;
-    CGFloat W = UIScreen.mainScreen.bounds.size.width;
-    CGFloat bw = MAX(1, c.bounds.size.width);
-    double sysScale = hypot(st.a, st.b) * bw / W;
-    CGPoint sysScr = [sv convertPoint:sys toView:nil];
-    // k = muc do dang o che do switcher (the nho). Dang o full man hinh (app) thi k = 0 de khong dung vao hieu ung mo/dong app.
-    double k = clampd((0.85 - sysScale) / 0.25, 0, 1);
-    BOOL applied = [objc_getAssociatedObject(c, kApplied) boolValue];
-    CALayer *L = c.layer;
-    if (k < 0.001) {
-        if (applied) {
-            L.position = sys; L.transform = CATransform3DMakeAffineTransform(st); L.opacity = (float)sa; L.zPosition = 0; L.doubleSided = YES;
-            objc_setAssociatedObject(c, kApplied, @NO, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        }
-        return;
-    }
-    NSInteger n = 8, idx = NSNotFound;
-    NSArray *ls = send0(csFluid, @"appLayouts");
-    if (![ls isKindOfClass:NSArray.class]) ls = send0(send0(c, @"delegate"), @"appLayouts");
-    id lay = send0(c, @"appLayout");
-    if ([ls isKindOfClass:NSArray.class]) { n = (NSInteger)ls.count; if (lay) idx = (NSInteger)[ls indexOfObject:lay]; }
-    n = MAX(3, MIN(n, (NSInteger)C.count));
-    double step = 360.0 / n;
-    double spacing = W * 0.62;
-    double phi = normDeg((sysScr.x - W / 2) / spacing * step);
-    double r = phi * M_PI / 180.0, e = C.cam * M_PI / 180.0, R = C.radius * 1.8, P = 900;
-    double x = R * sin(r), depth = R * cos(r) - R, z = depth * cos(e), y = depth * sin(e);
-    double s = 1.0 / (1.0 - z / P);
-    double yaw = -C.tilt * clampd(phi / 45.0, -1, 1) * M_PI / 180.0;
-    double ringScale = 0.46 * C.size / 100.0 * s;
-    double scale = sysScale + (ringScale - sysScale) * k;
-    double f = scale * W / bw;
-    CGPoint ringScr = CGPointMake(W / 2 + x * s, sysScr.y + C.off + y * s);
-    CGPoint scr = CGPointMake(sysScr.x + (ringScr.x - sysScr.x) * k, sysScr.y + (ringScr.y - sysScr.y) * k);
-    CGPoint pos = [sv convertPoint:scr fromView:nil];
-    CATransform3D t = CATransform3DIdentity;
-    t.m34 = -1.0 / P;
-    t = CATransform3DRotate(t, yaw * k, 0, 1, 0);
-    t = CATransform3DScale(t, f, f, 1);
-    double op = 0.4 + 0.6 * (cos(r) + 1) / 2;
-    double hide = (idx != NSNotFound && idx >= C.count) ? 0 : 1;
-    if (!isfinite(pos.x) || !isfinite(pos.y) || !isfinite(f) || f <= 0.001 || !isfinite(z) || !isfinite(op)) return;
-    csLastApply = CACurrentMediaTime();
-    L.position = pos;
-    L.transform = t;
-    L.opacity = (float)(sa * (1 + (op * hide - 1) * k));
-    L.zPosition = z * k;
-    L.doubleSided = cos(yaw * k) >= 0;
-    objc_setAssociatedObject(c, kApplied, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    csCnt[5]++;
-}
-
-static void csApplyRing(UIView *c) {
-    static BOOL busy;
-    if (busy) return;
-    busy = YES;
-    @try { csApplyRingInner(c); } @catch (NSException *e) { csLog(@"apply exception: %@", e); }
-    busy = NO;
-}
-
 // ---- Cac ham DO (chi doc, khong hook, khong thay doi gi) ----
 static NSString *csChain(Class k) {
     NSMutableArray *a = [NSMutableArray array];
@@ -1272,6 +1186,14 @@ static void csWalk(UIView *v, int d, int maxD, NSMutableString *out, int *budget
     for (UIView *x in v.subviews) csWalk(x, d + 1, maxD, out, budget);
 }
 
+static UIViewController *csFindVC(UIViewController *v, NSString *cls, int d) {
+    if (!v || d > 8) return nil;
+    if ([NSStringFromClass(v.class) isEqualToString:cls]) return v;
+    for (UIViewController *c in v.childViewControllers) { UIViewController *r = csFindVC(c, cls, d + 1); if (r) return r; }
+    UIViewController *p = v.presentedViewController;
+    return p ? csFindVC(p, cls, d + 1) : nil;
+}
+
 static void csViewDump(void) {
     static int dumps;
     if (++dumps > 4) return;
@@ -1301,52 +1223,136 @@ static void csViewDump(void) {
             csWalk(hit, 0, 7, out, &budget);
             csLog(@"tree from %@ (superview=%@):\n%@", NSStringFromClass(hit.class), NSStringFromClass(hit.superview.class), out);
         }
+        UIViewController *deck = csFindVC(rvc, @"SBDeckSwitcherViewController", 0);
+        if (deck && deck.isViewLoaded) {
+            NSMutableString *o2 = [NSMutableString string]; int b2 = 260;
+            csWalk(deck.view, 0, 9, o2, &b2);
+            csLog(@"DECK VC view tree (%@):\n%@", NSStringFromClass(deck.class), o2);
+        } else csLog(@"DECK VC not found under rootVC");
     }
 }
 
 static int csPrevVis = -1;
 
-static void csDumpSwitcher(void) {
-    static int dumps;
-    if (++dumps > 6) return;
-    UIViewController *fl = csFluid;
-    csLog(@"=== DUMP #%d fluid=%@ hooks: center=%d transform=%d alpha=%d frame=%d layout=%d applied=%d", dumps,
-          fl ? NSStringFromClass(fl.class) : @"nil", csCnt[0], csCnt[1], csCnt[2], csCnt[3], csCnt[4], csCnt[5]);
-    NSArray *ls = send0(fl, @"appLayouts");
-    if (![ls isKindOfClass:NSArray.class]) { csLog(@"dump: no appLayouts on fluid VC"); }
-    else for (NSUInteger i = 0; i < MIN(ls.count, 12); i++) {
-        id lay = ls[i];
-        NSArray *items = send0(lay, @"allItems");
-        NSString *b = ([items isKindOfClass:NSArray.class] && items.count) ? send0(items.firstObject, @"bundleIdentifier") : @"?";
-        UIView *c = send1(fl, @"_itemContainerForAppLayoutIfExists:", lay);
-        if (![c isKindOfClass:UIView.class]) { csLog(@"[%lu] %@ container=nil", (unsigned long)i, b); continue; }
-        NSValue *sc = objc_getAssociatedObject(c, kSysC);
-        csLog(@"[%lu] %@ %@ center=%@ sysCenter=%@ bounds=%@ alpha=%.2f superview=%@ win=%d",
-              (unsigned long)i, b, NSStringFromClass(c.class), NSStringFromCGPoint(c.center),
-              sc ? NSStringFromCGPoint(sc.CGPointValue) : @"(no hook hit)", NSStringFromCGRect(c.bounds), c.alpha,
-              c.superview ? NSStringFromClass(c.superview.class) : @"nil", c.window != nil);
+#pragma mark - real switcher (hook SBDeckSwitcherViewController, the stock iPhone switcher)
+
+@interface SBDeckSwitcherViewController : UIViewController
+@end
+
+#define CS_MARKER @"/var/mobile/Documents/CircleSwitcher.armed"
+static BOOL csTripped, csMarkerOn;
+static double csLastApply;
+static int csDeckHits, csDeckApplied;
+static const void *kMineP = &kMineP, *kMineT = &kMineT, *kSysP = &kSysP, *kSysT = &kSysT, *kSysO = &kSysO, *kApplied = &kApplied;
+
+static BOOL csT3Near(CATransform3D a, CATransform3D b) {
+    return fabs(a.m11 - b.m11) < 1e-3 && fabs(a.m12 - b.m12) < 1e-3 && fabs(a.m21 - b.m21) < 1e-3 && fabs(a.m22 - b.m22) < 1e-3 &&
+           fabs(a.m34 - b.m34) < 1e-6 && fabs(a.m41 - b.m41) < 0.05 && fabs(a.m42 - b.m42) < 0.05 && fabs(a.m43 - b.m43) < 0.05;
+}
+
+// Gom cac the app that (view co ten chua "ItemContainer") ben trong view cua switcher
+static void csCollect(UIView *v, int d, NSMutableArray *out, int *budget) {
+    if (--(*budget) < 0 || d > 9) return;
+    if ([NSStringFromClass(v.class) rangeOfString:@"ItemContainer"].location != NSNotFound) { [out addObject:v]; return; }
+    for (UIView *x in v.subviews) csCollect(x, d + 1, out, budget);
+}
+
+// Xep mot the vao vong 3D dua tren vi tri DO HE THONG dat (nen cuon, vuot, dong app van tu khop).
+// Tra ve k (0 = dang o full man hinh/khong can, 1 = che do switcher).
+static double csDeckApplyCard(UIView *c) {
+    UIView *sv = c.superview;
+    if (!sv || !c.window) return -1;
+    CALayer *L = c.layer;
+    CGFloat W = UIScreen.mainScreen.bounds.size.width;
+    CGFloat bw = MAX(1, c.bounds.size.width);
+    NSValue *mp = objc_getAssociatedObject(c, kMineP), *mt = objc_getAssociatedObject(c, kMineT);
+    CGPoint curP = L.position; CATransform3D curT = L.transform;
+    BOOL mine = mp && mt && fabs(curP.x - mp.CGPointValue.x) < 0.05 && fabs(curP.y - mp.CGPointValue.y) < 0.05 && csT3Near(curT, mt.CATransform3DValue);
+    if (!mine) {
+        objc_setAssociatedObject(c, kSysP, [NSValue valueWithCGPoint:curP], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(c, kSysT, [NSValue valueWithCATransform3D:curT], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(c, kSysO, @(L.opacity), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    for (NSString *cn in @[@"SBFluidSwitcherViewController", @"SBFluidSwitcherItemContainer", @"SBDeckSwitcherPersonality"]) {
-        Class k = NSClassFromString(cn);
-        if (!k) { csLog(@"class %@ = nil", cn); continue; }
-        unsigned n = 0; Method *ms = class_copyMethodList(k, &n);
-        NSMutableArray *names = [NSMutableArray array];
-        for (unsigned i = 0; i < n; i++) [names addObject:NSStringFromSelector(method_getName(ms[i]))];
-        free(ms);
-        NSString *joined = [names componentsJoinedByString:@" "];
-        if (joined.length > 3500) joined = [joined substringToIndex:3500];
-        csLog(@"methods %@ (%u): %@", cn, n, joined);
-    }
-    if (dumps == 1) {
-        unsigned cnt = 0; Class *all = objc_copyClassList(&cnt);
-        NSMutableArray *mods = [NSMutableArray array];
-        for (unsigned i = 0; i < cnt; i++) {
-            const char *nm = class_getName(all[i]);
-            if (strncmp(nm, "SB", 2) == 0 && (strstr(nm, "SwitcherModifier") || strstr(nm, "SwitcherPersonality") || strstr(nm, "SwitcherItem"))) [mods addObject:@(nm)];
+    NSValue *spv = objc_getAssociatedObject(c, kSysP), *stv = objc_getAssociatedObject(c, kSysT);
+    if (!spv || !stv) return -1;
+    CGPoint sys = spv.CGPointValue; CATransform3D sysT = stv.CATransform3DValue;
+    NSNumber *so = objc_getAssociatedObject(c, kSysO);
+    double sa = so ? so.doubleValue : 1.0;
+    if (!isfinite(sys.x) || !isfinite(sys.y)) return -1;
+    CGAffineTransform st = CATransform3DGetAffineTransform(sysT);
+    double sysScale = hypot(st.a, st.b) * bw / W;
+    double k = clampd((0.85 - sysScale) / 0.25, 0, 1);
+    BOOL applied = [objc_getAssociatedObject(c, kApplied) boolValue];
+    if (k < 0.001) {
+        if (applied) {
+            L.position = sys; L.transform = sysT; L.opacity = (float)sa; L.zPosition = 0; L.doubleSided = YES;
+            objc_setAssociatedObject(c, kApplied, @NO, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            objc_setAssociatedObject(c, kMineP, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            objc_setAssociatedObject(c, kMineT, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         }
-        free(all);
-        csLog(@"switcher classes (%lu): %@", (unsigned long)mods.count, [mods componentsJoinedByString:@" "]);
+        return k;
     }
+    CGPoint sysScr = [sv convertPoint:sys toView:nil];
+    double step = 360.0 / MAX(3, C.count);
+    double spacing = W * 0.62;
+    double phi = normDeg((sysScr.x - W / 2) / spacing * step);
+    double r = phi * M_PI / 180.0, e = C.cam * M_PI / 180.0, R = C.radius * 1.8, P = 900;
+    double x = R * sin(r), depth = R * cos(r) - R, z = depth * cos(e), y = depth * sin(e);
+    double s = 1.0 / (1.0 - z / P);
+    double yaw = -C.tilt * clampd(phi / 45.0, -1, 1) * M_PI / 180.0;
+    double ringScale = 0.46 * C.size / 100.0 * s;
+    double scale = sysScale + (ringScale - sysScale) * k;
+    double f = scale * W / bw;
+    CGPoint ringScr = CGPointMake(W / 2 + x * s, sysScr.y + C.off + y * s);
+    CGPoint scr = CGPointMake(sysScr.x + (ringScr.x - sysScr.x) * k, sysScr.y + (ringScr.y - sysScr.y) * k);
+    CGPoint pos = [sv convertPoint:scr fromView:nil];
+    CATransform3D t = CATransform3DIdentity;
+    t.m34 = -1.0 / P;
+    t = CATransform3DRotate(t, yaw * k, 0, 1, 0);
+    t = CATransform3DScale(t, f, f, 1);
+    double op = 0.4 + 0.6 * (cos(r) + 1) / 2;
+    if (!isfinite(pos.x) || !isfinite(pos.y) || !isfinite(f) || f <= 0.001 || !isfinite(z) || !isfinite(op)) return k;
+    csLastApply = CACurrentMediaTime();
+    L.position = pos;
+    L.transform = t;
+    L.opacity = (float)(sa * (1 + (op - 1) * k));
+    L.zPosition = z * k;
+    L.doubleSided = cos(yaw * k) >= 0;
+    objc_setAssociatedObject(c, kMineP, [NSValue valueWithCGPoint:L.position], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(c, kMineT, [NSValue valueWithCATransform3D:L.transform], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(c, kApplied, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    csDeckApplied++;
+    return k;
+}
+
+static void csDeckLayout(UIViewController *vc) {
+    if (!C.enabled || C.mode != 0 || csTripped || -[csBoot timeIntervalSinceNow] < 12) return;
+    static BOOL busy;
+    if (busy || !vc.isViewLoaded) return;
+    busy = YES;
+    @try {
+        NSMutableArray *cards = [NSMutableArray array];
+        int budget = 800;
+        csCollect(vc.view, 0, cards, &budget);
+        csDeckHits++;
+        static int logged, noCard;
+        if (!cards.count) {
+            if (noCard++ < 3) {
+                NSMutableString *out = [NSMutableString string]; int b = 150;
+                csWalk(vc.view, 0, 6, out, &b);
+                csLog(@"deck layout: NO ItemContainer found. tree:\n%@", out);
+            }
+        } else {
+            double k0 = -2;
+            for (UIView *c in cards) { double k = csDeckApplyCard(c); if (k0 == -2) k0 = k; }
+            if (logged++ < 8) {
+                UIView *f = cards.firstObject;
+                csLog(@"deck layout #%d: cards=%lu first=%@ pos=%@ bounds=%@ k=%.2f applied=%d", csDeckHits, (unsigned long)cards.count,
+                      NSStringFromClass(f.class), NSStringFromCGPoint(f.layer.position), NSStringFromCGRect(f.bounds), k0, csDeckApplied);
+            }
+        }
+    } @catch (NSException *e) { csLog(@"deck layout exception: %@", e); }
+    busy = NO;
 }
 
 static void csGuardTick(void) {
@@ -1356,9 +1362,6 @@ static void csGuardTick(void) {
     BOOL need = up < 20 || recent;
     if (need && !csMarkerOn) { [@"1" writeToFile:CS_MARKER atomically:NO encoding:NSUTF8StringEncoding error:nil]; csMarkerOn = YES; }
     else if (!need && csMarkerOn) { [NSFileManager.defaultManager removeItemAtPath:CS_MARKER error:nil]; csMarkerOn = NO; }
-    static BOOL dumped;
-    if (recent && !dumped) { dumped = YES; dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ csDumpSwitcher(); }); }
-    if (!recent && csLastApply > 0) dumped = NO;
 }
 
 static void csTick(void) {
@@ -1366,7 +1369,7 @@ static void csTick(void) {
     csGuardTick();
     if (!C.enabled || C.mode != 2) {
         if (csOverlay.superview && !csOverlay.testMode) csHideOverlay();
-        if (C.enabled && prefBool(CFSTR("probe"), NO) && -[csBoot timeIntervalSinceNow] > 15) {
+        if (C.enabled && C.mode == 1 && -[csBoot timeIntervalSinceNow] > 15) {
             csStaticDump();
             int v = csSafeVisible();
             if (v == 1 && csPrevVis != 1) dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ csViewDump(); });
@@ -1406,54 +1409,22 @@ static void csRespringNote(CFNotificationCenterRef c, void *o, CFStringRef n, co
     });
 }
 
-%group RealSwitcher
-
-%hook SBFluidSwitcherViewController
-- (void)viewDidLoad {
+%group DeckHook
+%hook SBDeckSwitcherViewController
+- (void)viewDidLayoutSubviews {
     %orig;
-    csFluid = (UIViewController *)self;
-}
-- (void)viewWillAppear:(BOOL)animated {
-    %orig;
-    csFluid = (UIViewController *)self;
+    csDeckLayout((UIViewController *)self);
 }
 %end
-
-%hook SBFluidSwitcherItemContainer
-- (void)setCenter:(CGPoint)p {
-    %orig;
-    csCnt[0]++;
-    objc_setAssociatedObject(self, kSysC, [NSValue valueWithCGPoint:p], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    csApplyRing((UIView *)self);
-}
-- (void)setFrame:(CGRect)f {
-    %orig;
-    csCnt[3]++;
-    NSValue *vt = objc_getAssociatedObject(self, kSysT);
-    if (!vt || CGAffineTransformIsIdentity(vt.CGAffineTransformValue)) {
-        objc_setAssociatedObject(self, kSysC, [NSValue valueWithCGPoint:CGPointMake(CGRectGetMidX(f), CGRectGetMidY(f))], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        csApplyRing((UIView *)self);
-    }
-}
-- (void)setTransform:(CGAffineTransform)t {
-    %orig;
-    csCnt[1]++;
-    objc_setAssociatedObject(self, kSysT, [NSValue valueWithCGAffineTransform:t], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    csApplyRing((UIView *)self);
-}
-- (void)setAlpha:(CGFloat)a {
-    %orig;
-    csCnt[2]++;
-    objc_setAssociatedObject(self, kSysA, @(a), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    csApplyRing((UIView *)self);
-}
-- (void)layoutSubviews {
-    %orig;
-    csCnt[4]++;
-    csApplyRing((UIView *)self);
-}
 %end
 
+%group DeckScroll
+%hook SBDeckSwitcherViewController
+- (void)scrollViewDidScroll:(UIScrollView *)sv {
+    %orig;
+    csDeckLayout((UIViewController *)self);
+}
+%end
 %end
 
 %ctor {
@@ -1478,17 +1449,22 @@ static void csRespringNote(CFNotificationCenterRef c, void *o, CFStringRef n, co
     if ([NSFileManager.defaultManager fileExistsAtPath:CS_MARKER]) {
         csTripped = YES;
         [NSFileManager.defaultManager removeItemAtPath:CS_MARKER error:nil];
-        int one = 1; CFNumberRef nm = CFNumberCreate(NULL, kCFNumberIntType, &one);
+        int one = 3; CFNumberRef nm = CFNumberCreate(NULL, kCFNumberIntType, &one);
         CFPreferencesSetAppValue(CFSTR("mode"), nm, CS_DOMAIN); CFRelease(nm);
         CFPreferencesAppSynchronize(CS_DOMAIN);
         loadCfg();
-        csLog(@"CRASH GUARD: SpringBoard died while the tweak was active -> mode set to 1 (log only), hooks disabled this boot");
+        csLog(@"CRASH GUARD: SpringBoard died while the tweak was active -> mode set to 3 (inert), hooks disabled this boot");
         return;
     }
     [@"1" writeToFile:CS_MARKER atomically:NO encoding:NSUTF8StringEncoding error:nil];
     csMarkerOn = YES;
-    if (C.mode == 0 && NSClassFromString(@"SBFluidSwitcherItemContainer")) { %init(RealSwitcher); csLog(@"real switcher hooks installed"); }
-    else csLog(@"real switcher hooks NOT installed (mode=%d, class=%d)", C.mode, NSClassFromString(@"SBFluidSwitcherItemContainer") != nil);
+    Class deck = NSClassFromString(@"SBDeckSwitcherViewController");
+    if (C.mode == 0 && deck) {
+        %init(DeckHook);
+        BOOL sc = [deck instancesRespondToSelector:@selector(scrollViewDidScroll:)];
+        if (sc) { %init(DeckScroll); }
+        csLog(@"real switcher hooks installed on SBDeckSwitcherViewController (scrollViewDidScroll=%d)", sc);
+    } else csLog(@"real switcher hooks NOT installed (mode=%d, deck class=%d)", C.mode, deck != nil);
     dispatch_async(dispatch_get_main_queue(), ^{
         CFNotificationCenterRef dc = CFNotificationCenterGetDarwinNotifyCenter();
         CFNotificationCenterAddObserver(dc, NULL, csTestNote, CS_TEST_NOTE, NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
