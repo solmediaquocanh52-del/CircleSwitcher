@@ -43,7 +43,7 @@ static CSCfg C;
 static void loadCfg(void) {
     CFPreferencesAppSynchronize(CS_DOMAIN);
     C.enabled = prefBool(CFSTR("enabled"), YES);
-    C.mode = (int)prefDouble(CFSTR("mode"), 0);
+    C.mode = (int)prefDouble(CFSTR("mode"), 1);
     C.icon = prefBool(CFSTR("icon"), YES);
     C.onlyFront = prefBool(CFSTR("onlyFront"), NO);
     C.nameIcon = prefBool(CFSTR("nameIcon"), YES);
@@ -1087,14 +1087,19 @@ static void csDiscoverOnce(void) {
 static const void *kSysC = &kSysC, *kSysT = &kSysT, *kSysA = &kSysA, *kApplied = &kApplied;
 static __weak UIViewController *csFluid;
 static int csCnt[6]; // setCenter, setTransform, setAlpha, setFrame, layoutSubviews, applied
+#define CS_MARKER @"/var/mobile/Documents/CircleSwitcher.armed"
+static BOOL csTripped, csMarkerOn;
+static double csLastApply;
 
 // Dat the app that thanh vong 3D, dua tren vi tri he thong dat (de tu khop voi cuon/vuot/dong app).
-static void csApplyRing(UIView *c) {
+static void csApplyRingInner(UIView *c) {
     if (!C.enabled || C.mode != 0) return;
     NSValue *vc = objc_getAssociatedObject(c, kSysC);
     UIView *sv = c.superview;
     if (!vc || !sv || !c.window) return;
+    if (csTripped || -[csBoot timeIntervalSinceNow] < 12) return;
     CGPoint sys = vc.CGPointValue;
+    if (!isfinite(sys.x) || !isfinite(sys.y)) return;
     NSValue *vt = objc_getAssociatedObject(c, kSysT);
     CGAffineTransform st = vt ? vt.CGAffineTransformValue : CGAffineTransformIdentity;
     NSNumber *na = objc_getAssociatedObject(c, kSysA);
@@ -1139,6 +1144,8 @@ static void csApplyRing(UIView *c) {
     t = CATransform3DScale(t, f, f, 1);
     double op = 0.4 + 0.6 * (cos(r) + 1) / 2;
     double hide = (idx != NSNotFound && idx >= C.count) ? 0 : 1;
+    if (!isfinite(pos.x) || !isfinite(pos.y) || !isfinite(f) || f <= 0.001 || !isfinite(z) || !isfinite(op)) return;
+    csLastApply = CACurrentMediaTime();
     L.position = pos;
     L.transform = t;
     L.opacity = (float)(sa * (1 + (op * hide - 1) * k));
@@ -1147,6 +1154,141 @@ static void csApplyRing(UIView *c) {
     objc_setAssociatedObject(c, kApplied, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     csCnt[5]++;
 }
+
+static void csApplyRing(UIView *c) {
+    static BOOL busy;
+    if (busy) return;
+    busy = YES;
+    @try { csApplyRingInner(c); } @catch (NSException *e) { csLog(@"apply exception: %@", e); }
+    busy = NO;
+}
+
+// ---- Cac ham DO (chi doc, khong hook, khong thay doi gi) ----
+static NSString *csChain(Class k) {
+    NSMutableArray *a = [NSMutableArray array];
+    for (; k; k = class_getSuperclass(k)) [a addObject:NSStringFromClass(k)];
+    return [a componentsJoinedByString:@" < "];
+}
+
+static void csProbeArrayCall(id o, NSString *tag, NSArray<NSString *> *sels) {
+    for (NSString *n in sels) {
+        SEL sl = NSSelectorFromString(n);
+        if (![o respondsToSelector:sl]) continue;
+        id r = nil;
+        @try { r = ((id (*)(id, SEL))objc_msgSend)(o, sl); } @catch (NSException *e) { continue; }
+        NSString *d = r ? NSStringFromClass([r class]) : @"nil";
+        if ([r isKindOfClass:NSArray.class]) {
+            NSArray *a = r; NSString *first = @"-";
+            if (a.count) {
+                id f = a[0]; NSArray *it = send0(f, @"allItems");
+                NSString *b = ([it isKindOfClass:NSArray.class] && it.count) ? send0(it[0], @"bundleIdentifier") : @"?";
+                first = [NSString stringWithFormat:@"%@ allItems=%lu b0=%@", NSStringFromClass([f class]), (unsigned long)([it isKindOfClass:NSArray.class] ? it.count : 0), b];
+            }
+            d = [NSString stringWithFormat:@"NSArray count=%lu first=%@", (unsigned long)a.count, first];
+        }
+        csLog(@"  %@.%@ -> %@", tag, n, d);
+    }
+}
+
+static void csStaticDump(void) {
+    static BOOL done;
+    if (done) return;
+    done = YES;
+    csLog(@"=== STATIC DUMP iOS %@ arch=%s", UIDevice.currentDevice.systemVersion,
+#if __arm64e__
+          "arm64e"
+#else
+          "arm64"
+#endif
+    );
+    NSArray *names = @[@"SBSwitcherViewController", @"SBDeckSwitcherViewController", @"SBFluidSwitcherViewController",
+                       @"SBDeckSwitcherItemContainer", @"SBFluidSwitcherItemContainer", @"SBRecentAppLayouts",
+                       @"SBMainSwitcherControllerCoordinator", @"SBDeckSwitcherPersonality", @"SBAppLayout"];
+    for (NSString *cn in names) {
+        Class k = NSClassFromString(cn);
+        if (!k) { csLog(@"class %@ = nil", cn); continue; }
+        unsigned n = 0; Method *ms = class_copyMethodList(k, &n);
+        NSMutableArray *mn = [NSMutableArray array];
+        for (unsigned i = 0; i < n; i++) [mn addObject:NSStringFromSelector(method_getName(ms[i]))];
+        free(ms);
+        NSString *joined = [mn componentsJoinedByString:@" "];
+        if (joined.length > 6000) joined = [joined substringToIndex:6000];
+        csLog(@"class %@ chain: %@ | methods(%u): %@", cn, csChain(k), n, joined);
+    }
+    unsigned cnt = 0; Class *all = objc_copyClassList(&cnt);
+    NSMutableArray *mods = [NSMutableArray array];
+    for (unsigned i = 0; i < cnt; i++) {
+        const char *nm = class_getName(all[i]);
+        if (strncmp(nm, "SB", 2) == 0 && (strstr(nm, "Switcher") || strstr(nm, "AppLayout"))) [mods addObject:@(nm)];
+    }
+    free(all);
+    csLog(@"switcher-ish classes (%lu): %@", (unsigned long)mods.count, [mods componentsJoinedByString:@" "]);
+    NSArray *cands = @[@"recents", @"recentAppLayouts", @"_recentAppLayouts", @"appLayouts", @"allAppLayouts", @"layouts", @"recentAppLayoutsForSwitcher"];
+    id ral = send0((id)NSClassFromString(@"SBRecentAppLayouts"), @"sharedInstance");
+    csLog(@"SBRecentAppLayouts sharedInstance=%@", ral ? NSStringFromClass([ral class]) : @"nil");
+    csProbeArrayCall(ral, @"SBRecentAppLayouts", cands);
+    id coord = send0((id)NSClassFromString(@"SBMainSwitcherControllerCoordinator"), @"sharedInstance");
+    csLog(@"Coordinator sharedInstance=%@", coord ? NSStringFromClass([coord class]) : @"nil");
+    csProbeArrayCall(coord, @"Coordinator", cands);
+}
+
+static int csSafeVisible(void) {
+    id coord = send0((id)NSClassFromString(@"SBMainSwitcherControllerCoordinator"), @"sharedInstance");
+    SEL s = NSSelectorFromString(@"isMainSwitcherVisible");
+    if (!coord || ![coord respondsToSelector:s]) return -1;
+    return ((BOOL (*)(id, SEL))objc_msgSend)(coord, s) ? 1 : 0;
+}
+
+static BOOL csHasSwitcher(UIView *v, int d, int *budget) {
+    if (--(*budget) < 0 || d > 12) return NO;
+    if ([NSStringFromClass(v.class) rangeOfString:@"Switcher"].location != NSNotFound) return YES;
+    for (UIView *x in v.subviews) if (csHasSwitcher(x, d + 1, budget)) return YES;
+    return NO;
+}
+
+static void csWalk(UIView *v, int d, int maxD, NSMutableString *out, int *budget) {
+    if (*budget <= 0 || d > maxD) return;
+    (*budget)--;
+    NSString *ind = [@"" stringByPaddingToLength:(NSUInteger)(d * 2) withString:@" " startingAtIndex:0];
+    CGAffineTransform t = v.transform;
+    [out appendFormat:@"%@%@ f=%@ a=%.2f hid=%d sub=%lu t=%@\n", ind, NSStringFromClass(v.class), NSStringFromCGRect(v.frame), v.alpha, v.hidden,
+     (unsigned long)v.subviews.count, CGAffineTransformIsIdentity(t) ? @"I" : [NSString stringWithFormat:@"a%.2f d%.2f", t.a, t.d]];
+    for (UIView *x in v.subviews) csWalk(x, d + 1, maxD, out, budget);
+}
+
+static void csViewDump(void) {
+    static int dumps;
+    if (++dumps > 4) return;
+    csLog(@"=== VIEW DUMP #%d", dumps);
+    NSMutableArray *wins = [NSMutableArray array];
+    for (UIScene *sc in UIApplication.sharedApplication.connectedScenes)
+        if ([sc isKindOfClass:UIWindowScene.class]) [wins addObjectsFromArray:((UIWindowScene *)sc).windows];
+    for (UIWindow *w in wins) {
+        int b = 4000;
+        if (!csHasSwitcher(w, 0, &b)) continue;
+        UIViewController *rvc = w.rootViewController;
+        NSMutableString *vcs = [NSMutableString string];
+        UIViewController *x = rvc; int n = 0;
+        while (x && n++ < 4) { [vcs appendFormat:@"%@ > ", NSStringFromClass(x.class)]; x = x.childViewControllers.firstObject; }
+        csLog(@"window %@ level=%.0f rootVC chain: %@", NSStringFromClass(w.class), w.windowLevel, vcs);
+        // tim view dau tien co ten chua "Switcher" o do sau nong nhat, in cay tu do
+        __block UIView *hit = nil;
+        NSMutableArray *queue = [NSMutableArray arrayWithObject:w];
+        int guard = 0;
+        while (queue.count && !hit && guard++ < 4000) {
+            UIView *v = queue.firstObject; [queue removeObjectAtIndex:0];
+            if ([NSStringFromClass(v.class) rangeOfString:@"Switcher"].location != NSNotFound) { hit = v; break; }
+            [queue addObjectsFromArray:v.subviews];
+        }
+        if (hit) {
+            NSMutableString *out = [NSMutableString string]; int budget = 120;
+            csWalk(hit, 0, 7, out, &budget);
+            csLog(@"tree from %@ (superview=%@):\n%@", NSStringFromClass(hit.class), NSStringFromClass(hit.superview.class), out);
+        }
+    }
+}
+
+static int csPrevVis = -1;
 
 static void csDumpSwitcher(void) {
     static int dumps;
@@ -1191,16 +1333,27 @@ static void csDumpSwitcher(void) {
     }
 }
 
-static int csPrevVis = -1;
+static void csGuardTick(void) {
+    double up = -[csBoot timeIntervalSinceNow];
+    double now = CACurrentMediaTime();
+    BOOL recent = csLastApply > 0 && now - csLastApply < 4;
+    BOOL need = up < 20 || recent;
+    if (need && !csMarkerOn) { [@"1" writeToFile:CS_MARKER atomically:NO encoding:NSUTF8StringEncoding error:nil]; csMarkerOn = YES; }
+    else if (!need && csMarkerOn) { [NSFileManager.defaultManager removeItemAtPath:CS_MARKER error:nil]; csMarkerOn = NO; }
+    static BOOL dumped;
+    if (recent && !dumped) { dumped = YES; dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ csDumpSwitcher(); }); }
+    if (!recent && csLastApply > 0) dumped = NO;
+}
 
 static void csTick(void) {
     if (++csTickCount % 12 == 1) loadCfg();
+    csGuardTick();
     if (!C.enabled || C.mode != 2) {
         if (csOverlay.superview && !csOverlay.testMode) csHideOverlay();
-        if (C.enabled && -[csBoot timeIntervalSinceNow] >= 8) {
-            csDiscoverOnce();
-            int v = csDetectVisible();
-            if (v == 1 && csPrevVis != 1) dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ csDumpSwitcher(); });
+        if (C.enabled && -[csBoot timeIntervalSinceNow] > 15) {
+            csStaticDump();
+            int v = csSafeVisible();
+            if (v == 1 && csPrevVis != 1) dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ csViewDump(); });
             csPrevVis = v;
         }
         return;
@@ -1236,24 +1389,6 @@ static void csRespringNote(CFNotificationCenterRef c, void *o, CFStringRef n, co
         });
     });
 }
-
-static void csNoteVC(UIViewController *vc, BOOL appear) {
-    NSString *cn = NSStringFromClass(vc.class);
-    if ([cn rangeOfString:@"Switcher" options:NSCaseInsensitiveSearch].location == NSNotFound) return;
-    if ([cn isEqualToString:@"SBMainSwitcherViewController"] || [cn isEqualToString:@"SBFluidSwitcherViewController"]) csHookVis = appear ? 1 : 0;
-    csLog(@"VC %@: %@", appear ? @"appear" : @"disappear", cn);
-}
-
-%hook UIViewController
-- (void)viewDidAppear:(BOOL)animated {
-    %orig;
-    csNoteVC(self, YES);
-}
-- (void)viewDidDisappear:(BOOL)animated {
-    %orig;
-    csNoteVC(self, NO);
-}
-%end
 
 %group RealSwitcher
 
@@ -1313,9 +1448,20 @@ static void csNoteVC(UIViewController *vc, BOOL appear) {
     loadCfg();
     csLog(@"CircleSwitcher loaded in %@", NSBundle.mainBundle.bundleIdentifier);
     if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.apple.springboard"]) return;
-    %init;
-    if (NSClassFromString(@"SBFluidSwitcherItemContainer")) { %init(RealSwitcher); csLog(@"real switcher hooks installed"); }
-    else csLog(@"SBFluidSwitcherItemContainer not found: real mode unavailable");
+    if ([NSFileManager.defaultManager fileExistsAtPath:CS_MARKER]) {
+        csTripped = YES;
+        [NSFileManager.defaultManager removeItemAtPath:CS_MARKER error:nil];
+        int one = 1; CFNumberRef nm = CFNumberCreate(NULL, kCFNumberIntType, &one);
+        CFPreferencesSetAppValue(CFSTR("mode"), nm, CS_DOMAIN); CFRelease(nm);
+        CFPreferencesAppSynchronize(CS_DOMAIN);
+        loadCfg();
+        csLog(@"CRASH GUARD: SpringBoard died while the tweak was active -> mode set to 1 (log only), hooks disabled this boot");
+        return;
+    }
+    [@"1" writeToFile:CS_MARKER atomically:NO encoding:NSUTF8StringEncoding error:nil];
+    csMarkerOn = YES;
+    if (C.mode == 0 && NSClassFromString(@"SBFluidSwitcherItemContainer")) { %init(RealSwitcher); csLog(@"real switcher hooks installed"); }
+    else csLog(@"real switcher hooks NOT installed (mode=%d, class=%d)", C.mode, NSClassFromString(@"SBFluidSwitcherItemContainer") != nil);
     dispatch_async(dispatch_get_main_queue(), ^{
         CFNotificationCenterRef dc = CFNotificationCenterGetDarwinNotifyCenter();
         CFNotificationCenterAddObserver(dc, NULL, csTestNote, CS_TEST_NOTE, NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
