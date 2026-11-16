@@ -1,6 +1,6 @@
 # CircleSwitcher
-Chuyen app dang vong tron 3D. Cai dat trong Cai dat > CircleSwitcher.
-Log: /var/mobile/Documents/CircleSwitcher.log
-Thu giao dien khong can mo switcher: bat "Thu hien giao dien" trong cai dat.
+Thay doi app switcher mac dinh: cac the app that xep thanh vong tron 3D.
+iOS 14+ (rootful / rootless / roothide). Cai dat > CircleSwitcher, nut Respring o dau trang.
 
-Chan doan: mo /var/mobile/Documents/CircleSwitcher.log, tim dong "switcher signals" va "probe".
+Che do: 0 = Thay switcher that (mac dinh), 1 = Chi ghi log, 2 = Lop phu kieu cu.
+Log: /var/mobile/Documents/CircleSwitcher.log  (tim "DUMP", "methods", "switcher classes")
