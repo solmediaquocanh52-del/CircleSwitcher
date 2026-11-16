@@ -36,8 +36,10 @@ static double prefDouble(CFStringRef key, double def) {
 
 typedef struct {
     BOOL enabled, icon, onlyFront, nameIcon, ram, inertia, haptic, dots, bubOn, keepPinned, debug;
-    int count, namePos, mode;
+    BOOL ringGlow, namePill, snapCircle, chevron;
+    int count, namePos, mode, style;
     double radius, tilt, cam, blur, size, off, bubSize;
+    double iconSize, centerSize, dim, bgBlur, glowHue;
 } CSCfg;
 static CSCfg C;
 
@@ -61,11 +63,29 @@ static void loadCfg(void) {
     C.namePos = (int)prefDouble(CFSTR("namePos"), 0);
     C.radius = prefDouble(CFSTR("radius"), 120);
     C.tilt = prefDouble(CFSTR("tilt"), 35);
-    C.cam = prefDouble(CFSTR("cam"), 8);
+    C.cam = prefDouble(CFSTR("cam"), 22);
     C.blur = prefDouble(CFSTR("blur"), 2);
     C.size = prefDouble(CFSTR("size"), 100);
     C.off = prefDouble(CFSTR("off"), 0);
     C.bubSize = prefDouble(CFSTR("bubSize"), 56);
+    C.style = (int)prefDouble(CFSTR("style"), 1);
+    if (C.style < 0 || C.style > 2) C.style = 1;
+    C.ringGlow = prefBool(CFSTR("ringGlow"), YES);
+    C.namePill = prefBool(CFSTR("namePill"), NO);
+    C.snapCircle = prefBool(CFSTR("snapCircle"), YES);
+    C.chevron = prefBool(CFSTR("chevron"), YES);
+    C.iconSize = prefDouble(CFSTR("iconSize"), 100);
+    C.centerSize = prefDouble(CFSTR("centerSize"), 100);
+    C.dim = prefDouble(CFSTR("dim"), 35);
+    C.bgBlur = prefDouble(CFSTR("bgBlur"), 10);
+    C.glowHue = prefDouble(CFSTR("glowHue"), 225);
+}
+
+static CSRingCfg csCfg(void) {
+    CSRingCfg c;
+    c.radius = C.radius; c.tilt = C.tilt; c.cam = C.cam; c.size = C.size; c.off = C.off; c.count = C.count;
+    c.style = C.style; c.iconSize = C.iconSize; c.centerSize = C.centerSize;
+    return c;
 }
 
 static NSArray<NSString *> *pinList(void) {
@@ -308,7 +328,7 @@ static void openApp(NSString *bid) {
 
 static NSAttributedString *labelFor(CSItem *it) {
     NSMutableAttributedString *as = [NSMutableAttributedString new];
-    UIFont *f = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
+    UIFont *f = [UIFont systemFontOfSize:(C.namePill ? 12 : 16) weight:UIFontWeightMedium];
     NSDictionary *at = @{NSFontAttributeName: f, NSForegroundColorAttributeName: UIColor.whiteColor};
     if (C.nameIcon && it.icon) {
         NSTextAttachment *ta = [NSTextAttachment new];
@@ -340,8 +360,10 @@ static NSAttributedString *labelFor(CSItem *it) {
 @property (nonatomic, strong) id blurFilter;
 @property (nonatomic, assign) CGRect hit;
 @property (nonatomic, assign) CGFloat zv;
+@property (nonatomic, assign) BOOL circle;
 - (void)configure:(CSItem *)it showIcon:(BOOL)on;
 - (void)setBlur:(double)r;
+- (void)setGlow:(double)k;
 @end
 
 @implementation CSCard
@@ -376,9 +398,22 @@ static NSAttributedString *labelFor(CSItem *it) {
     [super layoutSubviews];
     self.front.frame = self.bounds; self.back.frame = self.bounds;
     self.grad.frame = self.bounds;
-    CGFloat s = self.bounds.size.width * 0.56;
-    self.icon.frame = CGRectMake((self.bounds.size.width - s) / 2, (self.bounds.size.height - s) / 2, s, s);
+    CGFloat bw = self.bounds.size.width;
+    CGFloat s = bw * (self.circle ? 0.62 : 0.56);
+    self.icon.frame = CGRectMake((bw - s) / 2, (self.bounds.size.height - s) / 2, s, s);
     self.icon2.frame = self.icon.frame;
+    CGFloat cr = self.circle ? bw / 2 : 18;
+    self.front.layer.cornerRadius = cr; self.back.layer.cornerRadius = cr;
+    self.icon.layer.cornerRadius = self.circle ? s * 0.225 : 12;
+    self.front.layer.borderWidth = self.circle ? 1.6 : 0.5;
+    self.front.layer.borderColor = [UIColor colorWithWhite:1 alpha:self.circle ? 0.65 : 0.25].CGColor;
+    if (self.circle) self.layer.shadowPath = [UIBezierPath bezierPathWithOvalInRect:self.bounds].CGPath;
+}
+- (void)setGlow:(double)k {
+    if (!self.circle || !C.ringGlow) { self.layer.shadowOpacity = 0; return; }
+    UIColor *g = [UIColor colorWithHue:fmod(C.glowHue, 360.0) / 360.0 saturation:0.55 brightness:1 alpha:1];
+    self.layer.shadowColor = g.CGColor; self.layer.shadowOffset = CGSizeZero;
+    self.layer.shadowRadius = 8 + 10 * k; self.layer.shadowOpacity = (float)(0.25 + 0.65 * k);
 }
 - (void)setBlur:(double)r {
     @try {
@@ -524,7 +559,9 @@ static void csAddBubble(CSItem *it, CGPoint from) {
 
 @interface CSOverlay : UIView <UIGestureRecognizerDelegate>
 @property (nonatomic, strong) UIVisualEffectView *blurBg;
-@property (nonatomic, strong) UIView *ring, *labelHost, *dotsView;
+@property (nonatomic, strong) UIView *ring, *labelHost, *dotsView, *bubble;
+@property (nonatomic, strong) UIImageView *bubbleIcon, *chev;
+@property (nonatomic, strong) CAShapeLayer *glowRing;
 @property (nonatomic, strong) NSMutableArray<CSCard *> *cards;
 @property (nonatomic, strong) NSMutableArray<CSLabel *> *labels;
 @property (nonatomic, strong) NSMutableArray<CSItem *> *items;
@@ -541,6 +578,8 @@ static void csAddBubble(CSItem *it, CGPoint from) {
 @property (nonatomic, strong) UIImpactFeedbackGenerator *hapticGen;
 - (void)reloadItems;
 - (void)relayout;
+- (void)relayoutRing;
+- (void)relayoutCards;
 - (BOOL)userRecentlyTouched:(NSTimeInterval)sec;
 @end
 
@@ -558,6 +597,18 @@ static BOOL csForceHidden;
         _blurBg = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark]];
         _blurBg.frame = self.bounds; _blurBg.autoresizingMask = self.autoresizingMask;
         [self addSubview:_blurBg];
+        _glowRing = [CAShapeLayer layer];
+        _glowRing.fillColor = nil; _glowRing.lineWidth = 5; _glowRing.hidden = YES;
+        [self.layer addSublayer:_glowRing];
+        _bubble = [UIView new]; _bubble.userInteractionEnabled = NO; _bubble.hidden = YES;
+        _bubble.backgroundColor = [UIColor colorWithRed:0.12 green:0.2 blue:0.5 alpha:0.45];
+        _bubble.layer.borderWidth = 1.5; _bubble.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.45].CGColor;
+        _bubble.layer.shadowColor = [UIColor colorWithRed:0.4 green:0.5 blue:1 alpha:1].CGColor;
+        _bubble.layer.shadowOpacity = 0.7; _bubble.layer.shadowRadius = 16; _bubble.layer.shadowOffset = CGSizeZero;
+        _bubbleIcon = [UIImageView new]; _bubbleIcon.contentMode = UIViewContentModeScaleAspectFit; _bubbleIcon.clipsToBounds = YES;
+        [_bubble addSubview:_bubbleIcon]; [self addSubview:_bubble];
+        _chev = [[UIImageView alloc] initWithImage:[[UIImage systemImageNamed:@"chevron.compact.up" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:30 weight:UIImageSymbolWeightMedium]] imageWithTintColor:[UIColor colorWithWhite:1 alpha:0.75] renderingMode:UIImageRenderingModeAlwaysOriginal]];
+        _chev.hidden = YES; _chev.userInteractionEnabled = NO; [self addSubview:_chev];
         _ring = [UIView new]; _ring.userInteractionEnabled = NO; [self addSubview:_ring];
         _labelHost = [UIView new]; _labelHost.userInteractionEnabled = NO; _labelHost.frame = self.bounds; _labelHost.autoresizingMask = self.autoresizingMask;
         [self addSubview:_labelHost];
@@ -573,6 +624,10 @@ static BOOL csForceHidden;
 
         _xBtn = [self roundButton:@"xmark" action:@selector(onCloseAll)];
         _cleanBtn = [self roundButton:@"memorychip" action:@selector(onClean)];
+        for (UIButton *gb in @[_xBtn, _cleanBtn]) {
+            gb.backgroundColor = [UIColor colorWithWhite:1 alpha:0.12];
+            gb.layer.borderWidth = 1; gb.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.28].CGColor;
+        }
         _exitBtn = [UIButton buttonWithType:UIButtonTypeSystem];
         [_exitBtn setTitle:@"Thoát thử" forState:UIControlStateNormal];
         _exitBtn.tintColor = UIColor.whiteColor; _exitBtn.backgroundColor = [UIColor colorWithWhite:0.15 alpha:0.9];
@@ -612,8 +667,15 @@ static BOOL csForceHidden;
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGFloat W = self.bounds.size.width, H = self.bounds.size.height;
-    self.xBtn.center = CGPointMake(W / 2, H - 70);
-    self.cleanBtn.center = CGPointMake(W / 2 - 80, H - 70);
+    if (C.style != 2) {
+        self.xBtn.bounds = CGRectMake(0, 0, 170, 46);   // thanh kinh dang vien thuoc giong anh mau 2
+        self.xBtn.center = CGPointMake(W / 2, H - 92);
+        self.cleanBtn.center = CGPointMake(W / 2 - 124, H - 92);
+    } else {
+        self.xBtn.bounds = CGRectMake(0, 0, 46, 46);
+        self.xBtn.center = CGPointMake(W / 2, H - 70);
+        self.cleanBtn.center = CGPointMake(W / 2 - 80, H - 70);
+    }
     self.emptyLabel.frame = CGRectMake(0, H * 0.44, W, 24);
     self.exitBtn.frame = CGRectMake(16, 56, 92, 30);
     [self relayout];
@@ -671,12 +733,15 @@ static BOOL csForceHidden;
     for (UIView *v in self.labels) [v removeFromSuperview];
     [self.cards removeAllObjects]; [self.labels removeAllObjects];
     for (CSItem *it in self.items) {
-        CSCard *c = [[CSCard alloc] initWithFrame:CGRectMake(0, 0, 110, 186)];
+        BOOL circ = C.style != 2;
+        CSCard *c = [[CSCard alloc] initWithFrame:circ ? CGRectMake(0, 0, 100, 100) : CGRectMake(0, 0, 110, 186)];
+        c.circle = circ;
         [c configure:it showIcon:C.icon];
         [self.ring addSubview:c]; [self.cards addObject:c];
         CSLabel *l = [CSLabel new];
-        l.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.78];
+        l.backgroundColor = C.namePill ? [UIColor colorWithWhite:0.1 alpha:0.78] : UIColor.clearColor;
         l.layer.cornerRadius = 11; l.layer.masksToBounds = YES;
+        if (!C.namePill) { l.layer.shadowColor = UIColor.blackColor.CGColor; l.layer.shadowOpacity = 0.5; l.layer.shadowRadius = 3; l.layer.shadowOffset = CGSizeZero; l.layer.masksToBounds = NO; }
         l.attributedText = labelFor(it); [l sizeToFit];
         [self.labelHost addSubview:l]; [self.labels addObject:l];
     }
@@ -688,7 +753,7 @@ static BOOL csForceHidden;
     CGFloat W = self.bounds.size.width, H = self.bounds.size.height;
     NSUInteger n = self.items.count;
     CGFloat total = n * 10 - 4;
-    self.dotsView.frame = CGRectMake((W - total) / 2, H - 125, total, 6);
+    self.dotsView.frame = CGRectMake((W - total) / 2, H - (C.style == 2 ? 125 : 150), total, 6);
     self.dotsView.hidden = !C.dots || n == 0;
     for (NSUInteger i = 0; i < n; i++) {
         UIView *d = [[UIView alloc] initWithFrame:CGRectMake(i * 10, 0, 6, 6)];
@@ -702,7 +767,107 @@ static BOOL csForceHidden;
 
 #pragma mark layout
 
+- (void)applyBackground {
+    self.backgroundColor = [UIColor colorWithWhite:0 alpha:CSClamp(C.dim, 0, 90) / 100.0];
+    self.blurBg.hidden = C.bgBlur < 0.5;
+    self.blurBg.alpha = CSClamp(C.bgBlur / 10.0, 0, 1);
+}
+
 - (void)relayout {
+    [self applyBackground];
+    BOOL circ = C.style != 2;
+    if (!circ) {
+        self.glowRing.hidden = YES; self.bubble.hidden = YES; self.chev.hidden = YES;
+        [self relayoutCards];
+    } else [self relayoutRing];
+}
+
+- (void)relayoutRing {
+    NSInteger n = self.items.count;
+    if (n != (NSInteger)self.cards.count) return;
+    CGFloat W = self.bounds.size.width, H = self.bounds.size.height;
+    CGFloat cx = W / 2, cy = H * 0.46;
+    self.ring.bounds = CGRectMake(0, 0, 2, 2); self.ring.center = CGPointMake(cx, cy);
+    self.ring.layer.sublayerTransform = CATransform3DIdentity;
+    double step = [self step];
+    CSRingCfg cfg = csCfg();
+    // vong sang
+    if (C.ringGlow) {
+        double gx, gy, rx, ry; CSRingGlowRect(cfg, &gx, &gy, &rx, &ry);
+        UIColor *g = [UIColor colorWithHue:fmod(C.glowHue, 360.0) / 360.0 saturation:0.6 brightness:1 alpha:1];
+        self.glowRing.path = [UIBezierPath bezierPathWithOvalInRect:CGRectMake(cx + gx - rx, cy + gy - ry, rx * 2, ry * 2)].CGPath;
+        self.glowRing.strokeColor = [g colorWithAlphaComponent:0.75].CGColor;
+        self.glowRing.shadowColor = g.CGColor; self.glowRing.shadowOpacity = 0.9; self.glowRing.shadowRadius = 12; self.glowRing.shadowOffset = CGSizeZero;
+        self.glowRing.hidden = NO;
+    } else self.glowRing.hidden = YES;
+    double best = 1e9; NSInteger front = -1;
+    NSMutableArray *order = [NSMutableArray array];
+    double selDia = 0, selY = 0;
+    for (NSInteger i = 0; i < n; i++) {
+        CSCard *card = self.cards[i]; CSLabel *lb = self.labels[i];
+        double phi = normDeg(i * step - self.rot);
+        CSPose p = CSRingPoseCircle(phi, step, cfg, W);
+        double y = p.y;
+        if (i == self.front && self.dragY != 0) y += self.dragY;
+        if (fabs(card.bounds.size.width - 100) > 0.5 || fabs(card.bounds.size.height - 100) > 0.5) card.bounds = CGRectMake(0, 0, 100, 100);
+        double f = p.dia / 100.0;
+        card.layer.position = CGPointMake(1 + p.x, 1 + y);
+        CATransform3D t = CATransform3DIdentity; t.m34 = -1.0 / p.perspective;
+        t = CATransform3DRotate(t, p.yaw, 0, 1, 0);
+        t = CATransform3DScale(t, f, f, 1);
+        card.layer.transform = t; card.layer.zPosition = p.z + p.k * 2;
+        double op = p.opacity;
+        if (i == self.front && self.dragY < 0) op *= MAX(0.2, 1 + self.dragY / 220.0);
+        card.alpha = op;
+        [card setBlur:(C.style == 1 ? C.blur * MIN(1.0, fabs(phi) / 90.0) : 0)];
+        [card setGlow:p.k];
+        card.front.hidden = NO; card.back.hidden = YES;
+        double px = cx + p.x, py = cy + y, rr = p.dia / 2;
+        card.hit = CGRectMake(px - rr, py - rr, rr * 2, rr * 2); card.zv = p.z + p.k * 2;
+        [order addObject:card];
+        if (fabs(phi) < best) { best = fabs(phi); front = i; selDia = p.dia; selY = py; }
+        BOOL isFront = fabs(phi) <= step / 2;
+        BOOL show = C.namePos != 3 && isFront;
+        lb.hidden = !show;
+        if (show) {
+            double bubR = 59.0 * C.centerSize / 100.0 * C.size / 100.0;
+            double ly;
+            if (C.style == 0) {
+                ly = C.namePos == 0 ? py - rr - 18 : (C.namePos == 1 ? cy + C.off + bubR + 26 : cy + C.off + cfg.radius * 1.25 + selDia / 2 + 28);
+                lb.center = CGPointMake(C.namePos == 0 ? px : cx, ly);
+            } else {
+                ly = C.namePos == 0 ? py - rr - 20 : (C.namePos == 1 ? py : py + rr + 20);
+                lb.center = CGPointMake(px, ly);
+            }
+            lb.transform = CGAffineTransformIdentity;
+            lb.alpha = 1;
+        }
+    }
+    [order sortUsingComparator:^NSComparisonResult(CSCard *a, CSCard *b) { return a.zv < b.zv ? NSOrderedAscending : NSOrderedDescending; }];
+    for (CSCard *c in order) [self.ring bringSubviewToFront:c];
+    // bong bong o giua (anh mau 1) + mui ten
+    BOOL flat = C.style == 0 && n > 0;
+    self.bubble.hidden = !flat;
+    if (flat) {
+        double bd = 118.0 * C.centerSize / 100.0 * C.size / 100.0;
+        self.bubble.bounds = CGRectMake(0, 0, bd, bd); self.bubble.center = CGPointMake(cx, cy + C.off);
+        self.bubble.layer.cornerRadius = bd / 2;
+        self.bubbleIcon.frame = CGRectInset(self.bubble.bounds, bd * 0.24, bd * 0.24);
+        self.bubbleIcon.layer.cornerRadius = bd * 0.12;
+        if (front >= 0 && front < n) self.bubbleIcon.image = self.items[front].icon;
+        self.bubbleIcon.hidden = !C.icon;
+    }
+    self.chev.hidden = !(C.style == 0 && C.chevron && n > 0);
+    if (!self.chev.hidden) self.chev.center = CGPointMake(cx, selY - selDia / 2 - (C.namePos == 0 && C.style == 0 ? 52 : 26));
+    if (front != self.front) {
+        BOOL first = (self.front == -2);
+        self.front = front;
+        if (!first) [self buzz];
+        [self rebuildDots];
+    }
+}
+
+- (void)relayoutCards {
     NSInteger n = self.items.count;
     if (n != (NSInteger)self.cards.count) return;
     CGFloat W = self.bounds.size.width, H = self.bounds.size.height, P = 900;
@@ -1294,8 +1459,52 @@ static CSSys csCapture(UIView *c) {
     return s;
 }
 
+static const void *kMaskL = &kMaskL, *kHid = &kHid;
+
+static void csSetCircleMask(UIView *c, BOOL on) {
+    CALayer *L = c.layer;
+    CAShapeLayer *mine = objc_getAssociatedObject(c, kMaskL);
+    if (!on) { if (mine && L.mask == mine) L.mask = nil; objc_setAssociatedObject(c, kMaskL, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC); return; }
+    if (L.mask && L.mask != mine) return; // he thong dang dung mask rieng -> khong dung vao
+    CGFloat bw = c.bounds.size.width, bh = c.bounds.size.height;
+    if (!mine) { mine = [CAShapeLayer layer]; mine.fillColor = UIColor.blackColor.CGColor; objc_setAssociatedObject(c, kMaskL, mine, OBJC_ASSOCIATION_RETAIN_NONATOMIC); }
+    CGRect r = CGRectMake(0, (bh - bw) / 2, bw, bw);
+    mine.frame = c.bounds;
+    mine.path = [UIBezierPath bezierPathWithOvalInRect:r].CGPath;
+    L.mask = mine;
+}
+
+static void csHideHead(UIView *h, BOOL hide) {
+    BOOL was = [objc_getAssociatedObject(h, kHid) boolValue];
+    if (hide && !was) { h.hidden = YES; objc_setAssociatedObject(h, kHid, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC); }
+    else if (hide) h.hidden = YES;
+    else if (was) { h.hidden = NO; objc_setAssociatedObject(h, kHid, @NO, OBJC_ASSOCIATION_RETAIN_NONATOMIC); }
+}
+
+static NSString *csTitleOf(UIView *v, int d) {
+    if (d > 5) return nil;
+    if ([v isKindOfClass:UILabel.class] && ((UILabel *)v).text.length) return ((UILabel *)v).text;
+    for (UIView *x in v.subviews) { NSString *t = csTitleOf(x, d + 1); if (t) return t; }
+    return nil;
+}
+
+static CSLabel *csNameL;
+static void csShowName(NSString *t, CGPoint c) {
+    if (!t.length || C.namePos == 3) { csNameL.hidden = YES; return; }
+    if (!ensureWindow()) return;
+    if (!csNameL) {
+        csNameL = [CSLabel new]; csNameL.userInteractionEnabled = NO;
+        csNameL.textColor = UIColor.whiteColor; csNameL.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
+        csNameL.layer.shadowColor = UIColor.blackColor.CGColor; csNameL.layer.shadowOpacity = 0.5; csNameL.layer.shadowRadius = 3; csNameL.layer.shadowOffset = CGSizeZero;
+        [csRoot.view addSubview:csNameL];
+    }
+    if (![csNameL.text isEqualToString:t]) { csNameL.text = t; [csNameL sizeToFit]; }
+    csNameL.center = c; csNameL.hidden = NO;
+}
+
 static void csRestore(UIView *c, CSSys s) {
     if (![objc_getAssociatedObject(c, kApplied) boolValue]) return;
+    csSetCircleMask(c, NO);
     CALayer *L = c.layer;
     L.position = s.pos; L.transform = s.t; L.opacity = (float)s.op; L.zPosition = 0; L.doubleSided = YES;
     objc_setAssociatedObject(c, kApplied, @NO, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -1385,13 +1594,13 @@ static void csDeckLayout(UIViewController *vc) {
                 spacing = clampd(spacing, W * 0.25, W * 1.2);
                 double frac = (sy[order[ctr]].scr.x - W / 2) / spacing;
                 double step = 360.0 / MAX(3, MAX(C.count, m));
-                CSRingCfg cfg; cfg.radius = C.radius; cfg.tilt = C.tilt; cfg.cam = C.cam; cfg.size = C.size; cfg.off = C.off; cfg.count = C.count;
+                CSRingCfg cfg = csCfg(); BOOL circ = C.style != 2; int frontIdx = -1;
                 for (int j = 0; j < m; j++) {
                     int i = order[j]; UIView *c = cards[i];
                     double k = clampd((0.85 - ssc[i]) / 0.25, 0, 1);
                     if (k < 0.001) { csRestore(c, sy[i]); continue; }
                     double phi = normDeg(((j - ctr) + frac) * step);
-                    CSPose p = CSRingPose(phi, cfg);
+                    CSPose p = circ ? CSRingPoseCircle(phi, step, cfg, W) : CSRingPose(phi, cfg);
                     double scale = ssc[i] + (p.scale - ssc[i]) * k;
                     double f = scale * W / bw[i];
                     CGPoint scr = CGPointMake(sy[i].scr.x + (W / 2 + p.x - sy[i].scr.x) * k, sy[i].scr.y + p.y * k);
@@ -1406,7 +1615,9 @@ static void csDeckLayout(UIViewController *vc) {
                     L.opacity = (float)(sy[i].op * (1 + (p.opacity - 1) * k));
                     L.zPosition = p.z * k;
                     L.doubleSided = cos(p.yaw * k) >= 0;
+                    csSetCircleMask(c, circ && C.snapCircle && k > 0.5);
                     csStamp(c);
+                    if (j == ctr) frontIdx = i;
                     csLastApply = CACurrentMediaTime(); csDeckApplied++;
                     act[i] = YES; kk[i] = k; newX[i] = scr.x; newY[i] = scr.y;
                     ratio[i] = scale / MAX(0.05, ssc[i]); opf[i] = 1 + (p.opacity - 1) * k; zz[i] = p.z * k;
@@ -1414,27 +1625,22 @@ static void csDeckLayout(UIViewController *vc) {
                 BOOL any = NO;
                 for (int i = 0; i < n; i++) if (act[i]) any = YES;
                 int hn = (int)MIN((NSUInteger)60, heads.count);
+                NSString *frontName = nil;
                 for (int q = 0; q < hn; q++) {
                     UIView *h = heads[q];
-                    CSSys hs = csCapture(h);
-                    if (!hs.ok) continue;
-                    int bi = -1; double bd = 1e9;
-                    for (int i = 0; i < n; i++) if (vis[i]) { double d = fabs(hs.scr.x - sy[i].scr.x); if (d < bd) { bd = d; bi = i; } }
-                    CALayer *L = h.layer;
-                    if (bi >= 0 && act[bi] && bd < MAX(40.0, spacing * 0.6)) {
-                        CGPoint scr = CGPointMake(newX[bi] + (hs.scr.x - sy[bi].scr.x) * ratio[bi], newY[bi] + (hs.scr.y - sy[bi].scr.y) * ratio[bi]);
-                        CGPoint pos = [h.superview convertPoint:scr fromView:nil];
-                        if (!isfinite(pos.x) || !isfinite(pos.y)) continue;
-                        L.position = pos;
-                        L.transform = CATransform3DScale(hs.t, ratio[bi], ratio[bi], 1);
-                        L.opacity = (C.namePos == 3) ? 0 : (float)(hs.op * opf[bi]);
-                        L.zPosition = zz[bi];
-                        csStamp(h);
-                    } else if (any) {
-                        L.opacity = 0; // tieu de khong co the di kem -> an, khong de ket tren dinh man hinh
-                        csStamp(h);
-                    } else csRestore(h, hs);
+                    if (!any) { csHideHead(h, NO); continue; }
+                    csHideHead(h, YES); // tieu de he thong khong the di theo vong -> an, ve ten rieng ben duoi
+                    if (frontIdx >= 0 && !frontName && h.window) {
+                        CGPoint hc = [h.superview convertPoint:h.center toView:nil];
+                        if (fabs(hc.x - sy[frontIdx].scr.x) < MAX(40.0, spacing * 0.6)) frontName = csTitleOf(h, 0);
+                    }
                 }
+                if (any && frontIdx >= 0) {
+                    double dia = ratio[frontIdx] * ssc[frontIdx] * W;
+                    double hh = circ ? dia : dia * (UIScreen.mainScreen.bounds.size.height / W);
+                    double ly = C.namePos == 0 ? newY[frontIdx] - hh / 2 - 22 : (C.namePos == 1 ? newY[frontIdx] : newY[frontIdx] + hh / 2 + 22);
+                    csShowName(frontName, CGPointMake(newX[frontIdx], ly));
+                } else csNameL.hidden = YES;
             }
         }
     } @catch (NSException *e) { csLog(@"deck layout exception: %@", e); }
