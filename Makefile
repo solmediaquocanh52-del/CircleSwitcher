@@ -1,15 +1,19 @@
-TARGET := iphone:clang:latest:14.0
-ARCHS = arm64 arm64e
-INSTALL_TARGET_PROCESSES = SpringBoard
-
-include $(THEOS)/makefiles/common.mk
-
-TWEAK_NAME = CircleSwitcher
-CircleSwitcher_FILES = Tweak.x
-CircleSwitcher_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-error
-CircleSwitcher_FRAMEWORKS = UIKit QuartzCore AudioToolbox
-
-SUBPROJECTS += prefs
-
-include $(THEOS_MAKE_PATH)/tweak.mk
-include $(THEOS_MAKE_PATH)/aggregate.mk
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>entry</key>
+	<dict>
+		<key>bundle</key>
+		<string>CircleSwitcherPrefs</string>
+		<key>cell</key>
+		<string>PSLinkCell</string>
+		<key>detail</key>
+		<string>CSRootListController</string>
+		<key>isController</key>
+		<true/>
+		<key>label</key>
+		<string>CircleSwitcher</string>
+	</dict>
+</dict>
+</plist>
