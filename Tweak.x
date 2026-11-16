@@ -43,7 +43,7 @@ static CSCfg C;
 static void loadCfg(void) {
     CFPreferencesAppSynchronize(CS_DOMAIN);
     C.enabled = prefBool(CFSTR("enabled"), YES);
-    C.mode = (int)prefDouble(CFSTR("mode"), 1);
+    C.mode = (int)prefDouble(CFSTR("mode"), 2);
     C.icon = prefBool(CFSTR("icon"), YES);
     C.onlyFront = prefBool(CFSTR("onlyFront"), NO);
     C.nameIcon = prefBool(CFSTR("nameIcon"), YES);
@@ -219,6 +219,13 @@ static CSItem *itemFor(NSString *bid) {
     return it;
 }
 
+static BOOL csIsUserFacing(NSString *b) {
+    if (!b.length) return NO;
+    for (NSString *bad in @[@"PosterBoard", @"Spotlight", @"ViewService", @"Service", @"Extension", @"springboard", @"SpringBoard", @"Siri", @"CarPlay", @"InCall", @"AccessibilityUIServer", @"PreBoard", @"ShareSheet", @"RemoteViewService", @"WebContent"])
+        if ([b rangeOfString:bad].location != NSNotFound) return NO;
+    return YES;
+}
+
 static NSArray<NSString *> *recentBundleIDs(void) {
     NSMutableArray *out = [NSMutableArray array];
     @try {
@@ -257,7 +264,9 @@ static NSArray<NSString *> *recentBundleIDs(void) {
         }
     } @catch (NSException *e) { csLog(@"recents exception: %@", e); }
     [out removeObject:@"com.apple.springboard"];
-    return out;
+    NSMutableArray *clean = [NSMutableArray array];
+    for (NSString *b in out) if (csIsUserFacing(b)) [clean addObject:b];
+    return clean;
 }
 
 static BOOL killApp(NSString *bid) {
@@ -1357,7 +1366,7 @@ static void csTick(void) {
     csGuardTick();
     if (!C.enabled || C.mode != 2) {
         if (csOverlay.superview && !csOverlay.testMode) csHideOverlay();
-        if (C.enabled && -[csBoot timeIntervalSinceNow] > 15) {
+        if (C.enabled && prefBool(CFSTR("probe"), NO) && -[csBoot timeIntervalSinceNow] > 15) {
             csStaticDump();
             int v = csSafeVisible();
             if (v == 1 && csPrevVis != 1) dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ csViewDump(); });
@@ -1455,15 +1464,15 @@ static void csRespringNote(CFNotificationCenterRef c, void *o, CFStringRef n, co
     loadCfg();
     csLog(@"CircleSwitcher loaded in %@", NSBundle.mainBundle.bundleIdentifier);
     if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.apple.springboard"]) return;
-    if (prefDouble(CFSTR("modeVer"), 0) < 2) {
+    if (prefDouble(CFSTR("modeVer"), 0) < 3) {
         // ban cu luu mode=0 (Lop phu). Tu v1.1 so 0 la "Thay that" -> dat lai an toan mot lan
-        int m = 1, ver = 2;
+        int m = 2, ver = 3;
         CFNumberRef a = CFNumberCreate(NULL, kCFNumberIntType, &m), b = CFNumberCreate(NULL, kCFNumberIntType, &ver);
         CFPreferencesSetAppValue(CFSTR("mode"), a, CS_DOMAIN); CFPreferencesSetAppValue(CFSTR("modeVer"), b, CS_DOMAIN);
         CFRelease(a); CFRelease(b);
         CFPreferencesAppSynchronize(CS_DOMAIN);
         loadCfg();
-        csLog(@"migrated: mode reset to 1 (safe), modeVer=2");
+        csLog(@"migrated: mode reset to 2 (overlay, stable), modeVer=3");
     }
     if ([NSFileManager.defaultManager fileExistsAtPath:CS_MARKER]) {
         csTripped = YES;
