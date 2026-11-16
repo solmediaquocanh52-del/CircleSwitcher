@@ -2,3 +2,5 @@
 Chuyen app dang vong tron 3D. Cai dat trong Cai dat > CircleSwitcher.
 Log: /var/mobile/Documents/CircleSwitcher.log
 Thu giao dien khong can mo switcher: bat "Thu hien giao dien" trong cai dat.
+
+Chan doan: mo /var/mobile/Documents/CircleSwitcher.log, tim dong "switcher signals" va "probe".
