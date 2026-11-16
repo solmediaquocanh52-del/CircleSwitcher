@@ -31,6 +31,8 @@ static double csPref(NSString *key, double def, NSDictionary *over) {
 @property (nonatomic) BOOL touching;
 @property (nonatomic) CSRingCfg cfg;
 @property (nonatomic) int namePos;
+@property (nonatomic) BOOL glowOn;
+@property (nonatomic, strong) CAShapeLayer *glowRing;
 - (void)reloadWith:(NSDictionary *)over;
 @end
 
@@ -50,16 +52,17 @@ static const double kScreenW = 390.0, kScreenH = 844.0, kU = 0.30; // ti le thu 
         NSMutableArray *cs = [NSMutableArray array], *ns = [NSMutableArray array];
         NSArray *nm = @[@"Safari", @"Tin nhắn", @"Ảnh", @"Bản đồ", @"Ghi chú", @"Cài đặt", @"Máy ảnh", @"Nhạc", @"Thời tiết", @"Lịch", @"Mail", @"Lời nhắc"];
         for (int i = 0; i < 12; i++) {
-            UIView *c = [[UIView alloc] initWithFrame:CGRectMake(0, 0, kScreenW * kU, kScreenH * kU)];
+            UIView *c = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 100 * kU, 100 * kU)];
             c.backgroundColor = [UIColor colorWithHue:fmod(i * 0.083 + 0.55, 1.0) saturation:0.45 brightness:0.9 alpha:1];
             c.layer.cornerRadius = 40 * kU; c.clipsToBounds = NO;
             c.layer.masksToBounds = NO;
             UIView *ic = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 80 * kU, 80 * kU)];
             ic.center = CGPointMake(c.bounds.size.width / 2, c.bounds.size.height / 2);
+            ic.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin | UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin;
             ic.backgroundColor = [UIColor colorWithWhite:1 alpha:0.85]; ic.layer.cornerRadius = 18 * kU;
             [c addSubview:ic];
             UIView *bar = [[UIView alloc] initWithFrame:CGRectMake(20 * kU, 60 * kU, c.bounds.size.width - 40 * kU, 14 * kU)];
-            bar.backgroundColor = [UIColor colorWithWhite:1 alpha:0.5]; bar.layer.cornerRadius = 7 * kU;
+            bar.backgroundColor = [UIColor colorWithWhite:1 alpha:0.5]; bar.layer.cornerRadius = 7 * kU; bar.tag = 77;
             [c addSubview:bar];
             c.layer.shadowOpacity = 0.35; c.layer.shadowRadius = 4; c.layer.shadowOffset = CGSizeMake(0, 2);
             [s addSubview:c]; [cs addObject:c];
@@ -69,6 +72,8 @@ static const double kScreenW = 390.0, kScreenH = 844.0, kU = 0.30; // ti le thu 
             [s addSubview:l]; [ns addObject:l];
         }
         self.cards = cs; self.names = ns;
+        CAShapeLayer *gr = [CAShapeLayer layer]; gr.fillColor = nil; gr.lineWidth = 1.5; gr.hidden = YES;
+        [s.layer insertSublayer:gr atIndex:0]; self.glowRing = gr;
         self.t0 = CACurrentMediaTime();
         UIPanGestureRecognizer *pg = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(pan:)];
         [self addGestureRecognizer:pg];
@@ -115,6 +120,11 @@ static const double kScreenW = 390.0, kScreenH = 844.0, kU = 0.30; // ti le thu 
     c.size = csPref(@"size", d.size, over);
     c.off = csPref(@"off", d.off, over);
     c.count = (int)lround(csPref(@"count", d.count, over));
+    c.style = (int)csPref(@"style", d.style, over);
+    if (c.style < 0 || c.style > 2) c.style = 1;
+    c.iconSize = csPref(@"iconSize", d.iconSize, over);
+    c.centerSize = csPref(@"centerSize", d.centerSize, over);
+    self.glowOn = csPref(@"ringGlow", 1, over) != 0;
     if (c.count < 3) c.count = 3; if (c.count > 12) c.count = 12;
     self.cfg = c;
     self.namePos = (int)csPref(@"namePos", 0, over);
@@ -124,6 +134,7 @@ static const double kScreenW = 390.0, kScreenH = 844.0, kU = 0.30; // ti le thu 
 // Giong het phan xep vong trong Tweak.x: phi = ((j - ctr) + frac) * step, pose = CSRingPose
 - (void)relayout {
     int N = 7, ctr = 3;
+    BOOL circ = self.cfg.style != 2;
     double step = 360.0 / MAX(3, MAX(self.cfg.count, N));
     double frac = fmod(self.phase, 1.0); if (frac < 0) frac += 1.0; if (frac > 0.5) frac -= 1.0;
     int shift = (int)floor(self.phase + 0.5);
@@ -135,21 +146,35 @@ static const double kScreenW = 390.0, kScreenH = 844.0, kU = 0.30; // ti le thu 
         double rel = rank - ctr;
         double phi = fmod(((rel) + frac) * step + 540.0, 360.0) - 180.0;
         CSRingCfg cfg = self.cfg; if (cfg.count < N) cfg.count = N;
-        CSPose p = CSRingPose(phi, cfg);
+        CSPose p = circ ? CSRingPoseCircle(phi, step, cfg, kScreenW) : CSRingPose(phi, cfg);
         c.hidden = NO;
+        double bw = circ ? 100 * kU : kScreenW * kU, bh = circ ? 100 * kU : kScreenH * kU;
+        c.bounds = CGRectMake(0, 0, bw, bh);
+        c.layer.cornerRadius = circ ? bw / 2 : 40 * kU;
+        c.layer.masksToBounds = circ;
+        [c viewWithTag:77].hidden = circ;
+        double sc = circ ? p.dia / 100.0 : p.scale;
         c.layer.position = CGPointMake(cx + p.x * kU, cy + p.y * kU);
         CATransform3D t = CATransform3DIdentity;
         t.m34 = -1.0 / (p.perspective * kU);
         t = CATransform3DRotate(t, p.yaw, 0, 1, 0);
-        t = CATransform3DScale(t, p.scale, p.scale, 1);
+        t = CATransform3DScale(t, sc, sc, 1);
         c.layer.transform = t;
         c.layer.zPosition = p.z * kU;
         c.layer.opacity = (float)p.opacity;
         c.layer.doubleSided = cos(p.yaw) >= 0;
-        BOOL showName = self.namePos != 3;
+        BOOL showName = self.namePos != 3 && (!circ || fabs(phi) <= step / 2);
         lb.hidden = !showName;
+        if (j == 0) {
+            self.glowRing.hidden = !(circ && self.glowOn);
+            if (!self.glowRing.hidden) {
+                double gx, gy, rx, ry; CSRingGlowRect(self.cfg, &gx, &gy, &rx, &ry);
+                self.glowRing.path = [UIBezierPath bezierPathWithOvalInRect:CGRectMake(cx + (gx - rx) * kU, cy + (gy - ry) * kU, rx * 2 * kU, ry * 2 * kU)].CGPath;
+                self.glowRing.strokeColor = [UIColor colorWithRed:0.45 green:0.55 blue:1 alpha:0.8].CGColor;
+            }
+        }
         if (showName) {
-            double ch = kScreenH * kU * p.scale;
+            double ch = circ ? 100 * kU * sc : kScreenH * kU * p.scale;
             double ly = cy + p.y * kU - ch / 2 - 9;
             if (self.namePos == 1) ly = cy + p.y * kU;
             if (self.namePos == 2) ly = cy + p.y * kU + ch / 2 + 9;
@@ -223,7 +248,8 @@ static const CGFloat kPreviewH = 270;
 - (void)resetDefaults {
     CSRingCfg d = CSRingDefaults();
     NSDictionary *vals = @{@"radius": @(d.radius), @"tilt": @(d.tilt), @"cam": @(d.cam), @"size": @(d.size),
-                           @"off": @(d.off), @"count": @(d.count), @"namePos": @0, @"blur": @2};
+                           @"off": @(d.off), @"count": @(d.count), @"namePos": @0, @"blur": @2,
+                           @"style": @(d.style), @"iconSize": @(d.iconSize), @"centerSize": @(d.centerSize)};
     for (NSString *k in vals)
         CFPreferencesSetAppValue((__bridge CFStringRef)k, (__bridge CFPropertyListRef)vals[k], CS_DOMAIN);
     CFPreferencesAppSynchronize(CS_DOMAIN);
