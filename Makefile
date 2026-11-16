@@ -9,4 +9,7 @@ CircleSwitcher_FILES = Tweak.x
 CircleSwitcher_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-error
 CircleSwitcher_FRAMEWORKS = UIKit QuartzCore AudioToolbox
 
+SUBPROJECTS += prefs
+
 include $(THEOS_MAKE_PATH)/tweak.mk
+include $(THEOS_MAKE_PATH)/aggregate.mk
