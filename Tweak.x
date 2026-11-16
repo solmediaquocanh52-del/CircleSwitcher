@@ -6,6 +6,7 @@
 #import <signal.h>
 #import <dlfcn.h>
 #import <math.h>
+#import "CSRing.h"
 
 #define CS_DOMAIN CFSTR("com.vn.circleswitcher")
 #define CS_LOGFILE @"/var/mobile/Documents/CircleSwitcher.log"
@@ -57,10 +58,10 @@ static void loadCfg(void) {
     C.count = (int)lround(prefDouble(CFSTR("count"), 8));
     if (C.count < 3) C.count = 3;
     if (C.count > 12) C.count = 12;
-    C.namePos = (int)prefDouble(CFSTR("namePos"), 2);
-    C.radius = prefDouble(CFSTR("radius"), 130);
-    C.tilt = prefDouble(CFSTR("tilt"), 50);
-    C.cam = prefDouble(CFSTR("cam"), 10);
+    C.namePos = (int)prefDouble(CFSTR("namePos"), 0);
+    C.radius = prefDouble(CFSTR("radius"), 120);
+    C.tilt = prefDouble(CFSTR("tilt"), 35);
+    C.cam = prefDouble(CFSTR("cam"), 8);
     C.blur = prefDouble(CFSTR("blur"), 2);
     C.size = prefDouble(CFSTR("size"), 100);
     C.off = prefDouble(CFSTR("off"), 0);
@@ -1250,105 +1251,190 @@ static BOOL csT3Near(CATransform3D a, CATransform3D b) {
            fabs(a.m34 - b.m34) < 1e-6 && fabs(a.m41 - b.m41) < 0.05 && fabs(a.m42 - b.m42) < 0.05 && fabs(a.m43 - b.m43) < 0.05;
 }
 
-// Gom cac the app that (view co ten chua "ItemContainer") ben trong view cua switcher
-static void csCollect(UIView *v, int d, NSMutableArray *out, int *budget) {
+// Gom the app that + dong tieu de (ten/icon app) ben trong view cua switcher
+static void csCollect(UIView *v, int d, NSMutableArray *cards, NSMutableArray *heads, int *budget) {
     if (--(*budget) < 0 || d > 9) return;
-    if ([NSStringFromClass(v.class) rangeOfString:@"ItemContainer"].location != NSNotFound) { [out addObject:v]; return; }
-    for (UIView *x in v.subviews) csCollect(x, d + 1, out, budget);
+    NSString *n = NSStringFromClass(v.class);
+    if ([n rangeOfString:@"Header"].location != NSNotFound || [n rangeOfString:@"IconImageContainer"].location != NSNotFound) {
+        [heads addObject:v]; return;
+    }
+    if ([n rangeOfString:@"ItemContainer"].location != NSNotFound) { [cards addObject:v]; return; }
+    for (UIView *x in v.subviews) csCollect(x, d + 1, cards, heads, budget);
 }
 
-// Xep mot the vao vong 3D dua tren vi tri DO HE THONG dat (nen cuon, vuot, dong app van tu khop).
-// Tra ve k (0 = dang o full man hinh/khong can, 1 = che do switcher).
-static double csDeckApplyCard(UIView *c) {
+typedef struct { BOOL ok; CGPoint pos, scr; CATransform3D t; double sc, op; } CSSys;
+static const void *kMineO = &kMineO;
+
+// Doc vi tri/ti le/do mo DO HE THONG dat (bo qua gia tri do chinh tweak da ghi)
+static CSSys csCapture(UIView *c) {
+    CSSys s; memset(&s, 0, sizeof s);
     UIView *sv = c.superview;
-    if (!sv || !c.window) return -1;
+    if (!sv || !c.window) return s;
     CALayer *L = c.layer;
-    CGFloat W = UIScreen.mainScreen.bounds.size.width;
-    CGFloat bw = MAX(1, c.bounds.size.width);
     NSValue *mp = objc_getAssociatedObject(c, kMineP), *mt = objc_getAssociatedObject(c, kMineT);
+    NSNumber *mo = objc_getAssociatedObject(c, kMineO);
     CGPoint curP = L.position; CATransform3D curT = L.transform;
-    BOOL mine = mp && mt && fabs(curP.x - mp.CGPointValue.x) < 0.05 && fabs(curP.y - mp.CGPointValue.y) < 0.05 && csT3Near(curT, mt.CATransform3DValue);
+    BOOL mine = mp && mt && mo && fabs(curP.x - mp.CGPointValue.x) < 0.05 && fabs(curP.y - mp.CGPointValue.y) < 0.05 &&
+                csT3Near(curT, mt.CATransform3DValue) && fabs(L.opacity - mo.floatValue) < 0.01;
     if (!mine) {
         objc_setAssociatedObject(c, kSysP, [NSValue valueWithCGPoint:curP], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         objc_setAssociatedObject(c, kSysT, [NSValue valueWithCATransform3D:curT], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         objc_setAssociatedObject(c, kSysO, @(L.opacity), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     NSValue *spv = objc_getAssociatedObject(c, kSysP), *stv = objc_getAssociatedObject(c, kSysT);
-    if (!spv || !stv) return -1;
-    CGPoint sys = spv.CGPointValue; CATransform3D sysT = stv.CATransform3DValue;
+    if (!spv || !stv) return s;
+    s.pos = spv.CGPointValue; s.t = stv.CATransform3DValue;
     NSNumber *so = objc_getAssociatedObject(c, kSysO);
-    double sa = so ? so.doubleValue : 1.0;
-    if (!isfinite(sys.x) || !isfinite(sys.y)) return -1;
-    CGAffineTransform st = CATransform3DGetAffineTransform(sysT);
-    double sysScale = hypot(st.a, st.b) * bw / W;
-    double k = clampd((0.85 - sysScale) / 0.25, 0, 1);
-    BOOL applied = [objc_getAssociatedObject(c, kApplied) boolValue];
-    if (k < 0.001) {
-        if (applied) {
-            L.position = sys; L.transform = sysT; L.opacity = (float)sa; L.zPosition = 0; L.doubleSided = YES;
-            objc_setAssociatedObject(c, kApplied, @NO, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            objc_setAssociatedObject(c, kMineP, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            objc_setAssociatedObject(c, kMineT, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        }
-        return k;
-    }
-    CGPoint sysScr = [sv convertPoint:sys toView:nil];
-    double step = 360.0 / MAX(3, C.count);
-    double spacing = W * 0.62;
-    double phi = normDeg((sysScr.x - W / 2) / spacing * step);
-    double r = phi * M_PI / 180.0, e = C.cam * M_PI / 180.0, R = C.radius * 1.8, P = 900;
-    double x = R * sin(r), depth = R * cos(r) - R, z = depth * cos(e), y = depth * sin(e);
-    double s = 1.0 / (1.0 - z / P);
-    double yaw = -C.tilt * clampd(phi / 45.0, -1, 1) * M_PI / 180.0;
-    double ringScale = 0.46 * C.size / 100.0 * s;
-    double scale = sysScale + (ringScale - sysScale) * k;
-    double f = scale * W / bw;
-    CGPoint ringScr = CGPointMake(W / 2 + x * s, sysScr.y + C.off + y * s);
-    CGPoint scr = CGPointMake(sysScr.x + (ringScr.x - sysScr.x) * k, sysScr.y + (ringScr.y - sysScr.y) * k);
-    CGPoint pos = [sv convertPoint:scr fromView:nil];
-    CATransform3D t = CATransform3DIdentity;
-    t.m34 = -1.0 / P;
-    t = CATransform3DRotate(t, yaw * k, 0, 1, 0);
-    t = CATransform3DScale(t, f, f, 1);
-    double op = 0.4 + 0.6 * (cos(r) + 1) / 2;
-    if (!isfinite(pos.x) || !isfinite(pos.y) || !isfinite(f) || f <= 0.001 || !isfinite(z) || !isfinite(op)) return k;
-    csLastApply = CACurrentMediaTime();
-    L.position = pos;
-    L.transform = t;
-    L.opacity = (float)(sa * (1 + (op - 1) * k));
-    L.zPosition = z * k;
-    L.doubleSided = cos(yaw * k) >= 0;
-    objc_setAssociatedObject(c, kMineP, [NSValue valueWithCGPoint:L.position], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    objc_setAssociatedObject(c, kMineT, [NSValue valueWithCATransform3D:L.transform], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    objc_setAssociatedObject(c, kApplied, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    csDeckApplied++;
-    return k;
+    s.op = so ? so.doubleValue : 1.0;
+    if (!isfinite(s.pos.x) || !isfinite(s.pos.y)) return s;
+    CGAffineTransform st = CATransform3DGetAffineTransform(s.t);
+    s.sc = hypot(st.a, st.b);
+    s.scr = [sv convertPoint:s.pos toView:nil];
+    s.ok = YES;
+    return s;
 }
 
+static void csRestore(UIView *c, CSSys s) {
+    if (![objc_getAssociatedObject(c, kApplied) boolValue]) return;
+    CALayer *L = c.layer;
+    L.position = s.pos; L.transform = s.t; L.opacity = (float)s.op; L.zPosition = 0; L.doubleSided = YES;
+    objc_setAssociatedObject(c, kApplied, @NO, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(c, kMineP, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(c, kMineT, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(c, kMineO, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static void csStamp(UIView *c) {
+    CALayer *L = c.layer;
+    objc_setAssociatedObject(c, kMineP, [NSValue valueWithCGPoint:L.position], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(c, kMineT, [NSValue valueWithCATransform3D:L.transform], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(c, kMineO, @(L.opacity), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(c, kApplied, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+// Cache danh sach the/tieu de: khong quet cay view moi khung hinh (nguyen nhan lag cu)
+static NSArray *csCards, *csHeads;
+static __weak UIView *csCacheRoot;
+static NSUInteger csCacheSig;
+static double csNextScan;
+static int csScanLogs;
+
+static NSUInteger csSigOf(void) {
+    UIView *a = csCards.firstObject, *b = csHeads.firstObject;
+    return a.superview.subviews.count * 131 + b.superview.subviews.count + csCards.count * 7 + csHeads.count;
+}
+
+static BOOL csCacheValid(UIView *root) {
+    if (!csCards.count || csCacheRoot != root) return NO;
+    for (UIView *c in csCards) if (!c.window) return NO;
+    return csSigOf() == csCacheSig;
+}
+
+static void csRefresh(UIView *root) {
+    if (csCacheValid(root)) return;
+    double now = CACurrentMediaTime();
+    if (now < csNextScan) return;
+    NSMutableArray *cards = [NSMutableArray array], *heads = [NSMutableArray array];
+    int budget = 900;
+    csCollect(root, 0, cards, heads, &budget);
+    csCards = cards; csHeads = heads; csCacheRoot = root; csCacheSig = csSigOf();
+    if (!cards.count) csNextScan = now + 0.5;
+    if (csScanLogs++ < 6) {
+        NSMutableString *hs = [NSMutableString string];
+        for (UIView *h in heads) [hs appendFormat:@"%@ ", NSStringFromClass(h.class)];
+        csLog(@"scan: cards=%lu headers=%lu [%@] cardClass=%@", (unsigned long)cards.count, (unsigned long)heads.count, hs,
+              cards.count ? NSStringFromClass([cards.firstObject class]) : @"-");
+    }
+}
+
+// Xep CA vong: tinh vi tri tung the theo thu tu that cua chung (do he thong dat) nen cuon/vuot/dong app van khop.
 static void csDeckLayout(UIViewController *vc) {
     if (!C.enabled || C.mode != 0 || csTripped || -[csBoot timeIntervalSinceNow] < 12) return;
     static BOOL busy;
     if (busy || !vc.isViewLoaded) return;
     busy = YES;
     @try {
-        NSMutableArray *cards = [NSMutableArray array];
-        int budget = 800;
-        csCollect(vc.view, 0, cards, &budget);
-        csDeckHits++;
-        static int logged, noCard;
-        if (!cards.count) {
-            if (noCard++ < 3) {
-                NSMutableString *out = [NSMutableString string]; int b = 150;
-                csWalk(vc.view, 0, 6, out, &b);
-                csLog(@"deck layout: NO ItemContainer found. tree:\n%@", out);
+        csRefresh(vc.view);
+        NSArray *cards = csCards, *heads = csHeads;
+        int n = (int)MIN((NSUInteger)40, cards.count);
+        if (n > 0) {
+            double W = UIScreen.mainScreen.bounds.size.width;
+            CSSys sy[40]; double bw[40], ssc[40], newX[40], newY[40], ratio[40], opf[40], zz[40], kk[40];
+            BOOL vis[40], act[40]; int order[40], m = 0;
+            for (int i = 0; i < n; i++) {
+                UIView *c = cards[i];
+                sy[i] = csCapture(c);
+                bw[i] = MAX(1, c.bounds.size.width);
+                ssc[i] = sy[i].sc * bw[i] / W;
+                vis[i] = sy[i].ok && !c.hidden && sy[i].op > 0.01 && ssc[i] > 0.02;
+                act[i] = NO; kk[i] = 0;
+                if (vis[i]) order[m++] = i;
             }
-        } else {
-            double k0 = -2;
-            for (UIView *c in cards) { double k = csDeckApplyCard(c); if (k0 == -2) k0 = k; }
-            if (logged++ < 8) {
-                UIView *f = cards.firstObject;
-                csLog(@"deck layout #%d: cards=%lu first=%@ pos=%@ bounds=%@ k=%.2f applied=%d", csDeckHits, (unsigned long)cards.count,
-                      NSStringFromClass(f.class), NSStringFromCGPoint(f.layer.position), NSStringFromCGRect(f.bounds), k0, csDeckApplied);
+            for (int a = 1; a < m; a++) { // sap xep theo x he thong (chen)
+                int t = order[a], b = a - 1;
+                while (b >= 0 && sy[order[b]].scr.x > sy[t].scr.x) { order[b + 1] = order[b]; b--; }
+                order[b + 1] = t;
+            }
+            if (m > 0) {
+                int ctr = 0; double best = 1e9;
+                for (int j = 0; j < m; j++) { double d = fabs(sy[order[j]].scr.x - W / 2); if (d < best) { best = d; ctr = j; } }
+                double sp = 0; int sc = 0;
+                if (ctr + 1 < m) { double d = sy[order[ctr + 1]].scr.x - sy[order[ctr]].scr.x; if (d > 1) { sp += d; sc++; } }
+                if (ctr > 0) { double d = sy[order[ctr]].scr.x - sy[order[ctr - 1]].scr.x; if (d > 1) { sp += d; sc++; } }
+                double spacing = sc ? sp / sc : W * 0.62;
+                spacing = clampd(spacing, W * 0.25, W * 1.2);
+                double frac = (sy[order[ctr]].scr.x - W / 2) / spacing;
+                double step = 360.0 / MAX(3, MAX(C.count, m));
+                CSRingCfg cfg; cfg.radius = C.radius; cfg.tilt = C.tilt; cfg.cam = C.cam; cfg.size = C.size; cfg.off = C.off; cfg.count = C.count;
+                for (int j = 0; j < m; j++) {
+                    int i = order[j]; UIView *c = cards[i];
+                    double k = clampd((0.85 - ssc[i]) / 0.25, 0, 1);
+                    if (k < 0.001) { csRestore(c, sy[i]); continue; }
+                    double phi = normDeg(((j - ctr) + frac) * step);
+                    CSPose p = CSRingPose(phi, cfg);
+                    double scale = ssc[i] + (p.scale - ssc[i]) * k;
+                    double f = scale * W / bw[i];
+                    CGPoint scr = CGPointMake(sy[i].scr.x + (W / 2 + p.x - sy[i].scr.x) * k, sy[i].scr.y + p.y * k);
+                    CGPoint pos = [c.superview convertPoint:scr fromView:nil];
+                    CATransform3D t = CATransform3DIdentity;
+                    t.m34 = -1.0 / p.perspective;
+                    t = CATransform3DRotate(t, p.yaw * k, 0, 1, 0);
+                    t = CATransform3DScale(t, f, f, 1);
+                    if (!isfinite(pos.x) || !isfinite(pos.y) || !isfinite(f) || f <= 0.001 || !isfinite(p.z) || !isfinite(p.opacity)) continue;
+                    CALayer *L = c.layer;
+                    L.position = pos; L.transform = t;
+                    L.opacity = (float)(sy[i].op * (1 + (p.opacity - 1) * k));
+                    L.zPosition = p.z * k;
+                    L.doubleSided = cos(p.yaw * k) >= 0;
+                    csStamp(c);
+                    csLastApply = CACurrentMediaTime(); csDeckApplied++;
+                    act[i] = YES; kk[i] = k; newX[i] = scr.x; newY[i] = scr.y;
+                    ratio[i] = scale / MAX(0.05, ssc[i]); opf[i] = 1 + (p.opacity - 1) * k; zz[i] = p.z * k;
+                }
+                BOOL any = NO;
+                for (int i = 0; i < n; i++) if (act[i]) any = YES;
+                int hn = (int)MIN((NSUInteger)60, heads.count);
+                for (int q = 0; q < hn; q++) {
+                    UIView *h = heads[q];
+                    CSSys hs = csCapture(h);
+                    if (!hs.ok) continue;
+                    int bi = -1; double bd = 1e9;
+                    for (int i = 0; i < n; i++) if (vis[i]) { double d = fabs(hs.scr.x - sy[i].scr.x); if (d < bd) { bd = d; bi = i; } }
+                    CALayer *L = h.layer;
+                    if (bi >= 0 && act[bi] && bd < MAX(40.0, spacing * 0.6)) {
+                        CGPoint scr = CGPointMake(newX[bi] + (hs.scr.x - sy[bi].scr.x) * ratio[bi], newY[bi] + (hs.scr.y - sy[bi].scr.y) * ratio[bi]);
+                        CGPoint pos = [h.superview convertPoint:scr fromView:nil];
+                        if (!isfinite(pos.x) || !isfinite(pos.y)) continue;
+                        L.position = pos;
+                        L.transform = CATransform3DScale(hs.t, ratio[bi], ratio[bi], 1);
+                        L.opacity = (C.namePos == 3) ? 0 : (float)(hs.op * opf[bi]);
+                        L.zPosition = zz[bi];
+                        csStamp(h);
+                    } else if (any) {
+                        L.opacity = 0; // tieu de khong co the di kem -> an, khong de ket tren dinh man hinh
+                        csStamp(h);
+                    } else csRestore(h, hs);
+                }
             }
         }
     } @catch (NSException *e) { csLog(@"deck layout exception: %@", e); }
