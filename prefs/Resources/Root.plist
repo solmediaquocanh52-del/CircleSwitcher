@@ -164,7 +164,7 @@
 			<key>cell</key>
 			<string>PSSliderCell</string>
 			<key>default</key>
-			<real>8.0</real>
+			<real>22.0</real>
 			<key>defaults</key>
 			<string>com.vn.circleswitcher</string>
 			<key>key</key>
@@ -241,6 +241,198 @@
 			<real>120.0</real>
 			<key>min</key>
 			<real>-120.0</real>
+			<key>showValue</key>
+			<true/>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>footerText</key>
+			<string>Kiểu 1: vòng phẳng, app đang chọn ở đỉnh, bong bóng ở giữa (ảnh mẫu 1). Kiểu 2: vòng nghiêng 3D, app đang chọn to ở giữa (ảnh mẫu 2). Kiểu 3: thẻ chữ nhật như bản cũ.</string>
+			<key>label</key>
+			<string>Kiểu hiển thị (giống ảnh mẫu)</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSLinkListCell</string>
+			<key>default</key>
+			<integer>1</integer>
+			<key>defaults</key>
+			<string>com.vn.circleswitcher</string>
+			<key>detail</key>
+			<string>PSListItemsController</string>
+			<key>key</key>
+			<string>style</string>
+			<key>label</key>
+			<string>Kiểu vòng</string>
+			<key>validTitles</key>
+			<array>
+				<string>Vòng phẳng (ảnh 1)</string>
+				<string>Vòng nghiêng 3D (ảnh 2)</string>
+				<string>Thẻ chữ nhật (cũ)</string>
+			</array>
+			<key>validValues</key>
+			<array>
+				<integer>0</integer>
+				<integer>1</integer>
+				<integer>2</integer>
+			</array>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.vn.circleswitcher</string>
+			<key>key</key>
+			<string>ringGlow</string>
+			<key>label</key>
+			<string>Vòng sáng phát quang</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.vn.circleswitcher</string>
+			<key>key</key>
+			<string>chevron</string>
+			<key>label</key>
+			<string>Mũi tên ^ phía trên (vòng phẳng)</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<false/>
+			<key>defaults</key>
+			<string>com.vn.circleswitcher</string>
+			<key>key</key>
+			<string>namePill</string>
+			<key>label</key>
+			<string>Tên app có nền viên thuốc</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.vn.circleswitcher</string>
+			<key>key</key>
+			<string>snapCircle</string>
+			<key>label</key>
+			<string>Switcher thật: cắt app thành hình tròn</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>Màu vòng sáng (0–360)</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSliderCell</string>
+			<key>default</key>
+			<real>225.0</real>
+			<key>defaults</key>
+			<string>com.vn.circleswitcher</string>
+			<key>key</key>
+			<string>glowHue</string>
+			<key>max</key>
+			<real>360.0</real>
+			<key>min</key>
+			<real>0.0</real>
+			<key>showValue</key>
+			<true/>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>Cỡ biểu tượng app xung quanh (%)</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSliderCell</string>
+			<key>default</key>
+			<real>100.0</real>
+			<key>defaults</key>
+			<string>com.vn.circleswitcher</string>
+			<key>key</key>
+			<string>iconSize</string>
+			<key>max</key>
+			<real>150.0</real>
+			<key>min</key>
+			<real>60.0</real>
+			<key>showValue</key>
+			<true/>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>Cỡ app/bong bóng ở giữa (%)</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSliderCell</string>
+			<key>default</key>
+			<real>100.0</real>
+			<key>defaults</key>
+			<string>com.vn.circleswitcher</string>
+			<key>key</key>
+			<string>centerSize</string>
+			<key>max</key>
+			<real>150.0</real>
+			<key>min</key>
+			<real>60.0</real>
+			<key>showValue</key>
+			<true/>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>Độ tối nền (%)</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSliderCell</string>
+			<key>default</key>
+			<real>35.0</real>
+			<key>defaults</key>
+			<string>com.vn.circleswitcher</string>
+			<key>key</key>
+			<string>dim</string>
+			<key>max</key>
+			<real>90.0</real>
+			<key>min</key>
+			<real>0.0</real>
+			<key>showValue</key>
+			<true/>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>Độ mờ nền (0 = tắt)</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSliderCell</string>
+			<key>default</key>
+			<real>10.0</real>
+			<key>defaults</key>
+			<string>com.vn.circleswitcher</string>
+			<key>key</key>
+			<string>bgBlur</string>
+			<key>max</key>
+			<real>10.0</real>
+			<key>min</key>
+			<real>0.0</real>
 			<key>showValue</key>
 			<true/>
 		</dict>
