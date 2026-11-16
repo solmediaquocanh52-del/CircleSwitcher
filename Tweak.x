@@ -1457,13 +1457,14 @@ static void csRespringNote(CFNotificationCenterRef c, void *o, CFStringRef n, co
 %end
 
 %ctor {
+    // Thoat ngay o moi tien trinh khac SpringBoard, truoc khi lam bat cu viec gi
+    if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.apple.springboard"]) return;
     csLines = [NSMutableArray new];
     itemCache = [NSMutableDictionary new];
     csBubbles = [NSMutableArray new];
     csBoot = [NSDate date];
     loadCfg();
     csLog(@"CircleSwitcher loaded in %@", NSBundle.mainBundle.bundleIdentifier);
-    if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.apple.springboard"]) return;
     if (prefDouble(CFSTR("modeVer"), 0) < 3) {
         // ban cu luu mode=0 (Lop phu). Tu v1.1 so 0 la "Thay that" -> dat lai an toan mot lan
         int m = 2, ver = 3;
