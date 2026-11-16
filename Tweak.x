@@ -221,7 +221,18 @@ static CSItem *itemFor(NSString *bid) {
 static NSArray<NSString *> *recentBundleIDs(void) {
     NSMutableArray *out = [NSMutableArray array];
     @try {
-        NSArray *layouts = send0(mainSwitcher(), @"recentAppLayouts");
+        id ms = mainSwitcher();
+        NSArray *layouts = send0(ms, @"recentAppLayouts");
+        if (![layouts isKindOfClass:NSArray.class] || !layouts.count) layouts = send0(send0((id)NSClassFromString(@"SBRecentAppLayouts"), @"sharedInstance"), @"recents");
+        if (![layouts isKindOfClass:NSArray.class] || !layouts.count) layouts = send0(ms, @"appLayouts");
+        if (![layouts isKindOfClass:NSArray.class] || !layouts.count) {
+            @try {
+                for (UIViewController *cvc in [(UIViewController *)ms childViewControllers]) {
+                    NSArray *al = send0(cvc, @"appLayouts");
+                    if ([al isKindOfClass:NSArray.class] && al.count) { layouts = al; break; }
+                }
+            } @catch (NSException *e) {}
+        }
         if ([layouts isKindOfClass:NSArray.class]) {
             for (id lay in layouts) {
                 NSArray *items = send0(lay, @"allItems");
@@ -979,22 +990,90 @@ static void csHideOverlay(void) {
     csLog(@"overlay hidden");
 }
 
+// Trang thai switcher theo hook vong doi VC (du phong khi khong co selector nao)
+static int csHookVis = -1;
+
+// Tra ve danh sach selector BOOL, khong tham so, ten co visible/showing/presented tren class (gom ca superclass)
+static NSArray<NSString *> *csProbeNames(Class cls) {
+    static NSMutableDictionary *cache;
+    if (!cache) cache = [NSMutableDictionary new];
+    NSString *key = NSStringFromClass(cls);
+    NSArray *hit = cache[key];
+    if (hit) return hit;
+    NSMutableArray *out = [NSMutableArray array];
+    for (Class k = cls; k && k != NSObject.class && k != UIViewController.class && k != UIResponder.class && k != UIView.class; k = class_getSuperclass(k)) {
+        unsigned n = 0;
+        Method *ms = class_copyMethodList(k, &n);
+        for (unsigned i = 0; i < n; i++) {
+            NSString *name = NSStringFromSelector(method_getName(ms[i]));
+            if ([name containsString:@":"]) continue;
+            char *rt = method_copyReturnType(ms[i]);
+            BOOL isBool = rt && (rt[0] == 'B' || rt[0] == 'c');
+            free(rt);
+            if (!isBool) continue;
+            NSString *l = name.lowercaseString;
+            if ([l containsString:@"visible"] || [l containsString:@"showing"] || [l containsString:@"presented"]) {
+                if (![out containsObject:name]) [out addObject:name];
+            }
+        }
+        free(ms);
+    }
+    cache[key] = out;
+    csLog(@"probe %@ -> %@", key, [out componentsJoinedByString:@", "]);
+    return out;
+}
+
 static int csDetectVisible(void) {
     id ms = mainSwitcher();
-    if (!ms) return -1;
+    NSMutableArray *objs = [NSMutableArray array];
+    id coord = send0((id)NSClassFromString(@"SBMainSwitcherControllerCoordinator"), @"sharedInstance");
+    if (coord) [objs addObject:coord];
+    if (ms) {
+        [objs addObject:ms];
+        @try { for (id c in [(UIViewController *)ms childViewControllers]) { if ([NSStringFromClass([c class]) rangeOfString:@"Switcher"].location != NSNotFound) [objs addObject:c]; } } @catch (NSException *e) {}
+    }
+    if (!objs.count) return csHookVis;
+
+    // Uu tien cac ten da biet, sau do toi cac ten tim thay bang runtime co chu "switcher"
+    NSArray *known = @[@"isAnySwitcherVisible", @"isMainSwitcherVisible", @"isSwitcherVisible", @"isSwitcherShowing", @"isVisible"];
     NSMutableString *sig = [NSMutableString string];
     int result = -1;
-    for (NSString *n in @[@"isVisible", @"isAnySwitcherVisible", @"isMainSwitcherVisible", @"isSwitcherVisible", @"isSwitcherShowing"]) {
-        SEL s = NSSelectorFromString(n);
-        if ([ms respondsToSelector:s]) {
-            BOOL b = ((BOOL (*)(id, SEL))objc_msgSend)(ms, s);
-            [sig appendFormat:@"%@=%d ", n, b];
+    for (id o in objs) {
+        NSString *cn = NSStringFromClass([o class]);
+        NSMutableArray *names = [NSMutableArray array];
+        for (NSString *k in known) if ([o respondsToSelector:NSSelectorFromString(k)]) [names addObject:k];
+        for (NSString *k in csProbeNames([o class])) {
+            if (![names containsObject:k] && [k.lowercaseString containsString:@"switcher"]) [names addObject:k];
+        }
+        for (NSString *n in names) {
+            BOOL b = NO;
+            @try { b = ((BOOL (*)(id, SEL))objc_msgSend)(o, NSSelectorFromString(n)); } @catch (NSException *e) { continue; }
+            [sig appendFormat:@"%@.%@=%d ", cn, n, b];
             if (result == -1) result = b ? 1 : 0;
         }
     }
+    if (result == -1 && csHookVis != -1) { result = csHookVis; [sig appendFormat:@"hookVis=%d ", csHookVis]; }
     if (sig.length == 0) [sig appendString:@"(no visibility selector found)"];
     if (![sig isEqualToString:csLastSig]) { csLastSig = [sig copy]; csLog(@"switcher signals: %@", sig); }
     return result;
+}
+
+static void csDiscoverOnce(void) {
+    static BOOL done;
+    if (done) return;
+    done = YES;
+    csLog(@"iOS %@ | SBMainSwitcherViewController=%d Coordinator=%d SBRecentAppLayouts=%d SBFluidSwitcherViewController=%d",
+          UIDevice.currentDevice.systemVersion,
+          NSClassFromString(@"SBMainSwitcherViewController") != nil,
+          NSClassFromString(@"SBMainSwitcherControllerCoordinator") != nil,
+          NSClassFromString(@"SBRecentAppLayouts") != nil,
+          NSClassFromString(@"SBFluidSwitcherViewController") != nil);
+    id ms = mainSwitcher();
+    csLog(@"mainSwitcher=%@ children=%@", ms ? NSStringFromClass([ms class]) : @"nil", ms ? [(UIViewController *)ms childViewControllers] : @[]);
+    for (NSString *n in @[@"SBMainSwitcherViewController", @"SBMainSwitcherControllerCoordinator", @"SBFluidSwitcherViewController"]) {
+        Class k = NSClassFromString(n);
+        if (k) csProbeNames(k);
+    }
 }
 
 static void csTick(void) {
@@ -1004,7 +1083,8 @@ static void csTick(void) {
         if (csOverlay.superview && !csOverlay.testMode) csHideOverlay();
         return;
     }
-    if (-[csBoot timeIntervalSinceNow] < 25) return;
+    if (-[csBoot timeIntervalSinceNow] < 8) return;
+    csDiscoverOnce();
     if (csOverlay.superview && csOverlay.testMode) return;
     int vis = csDetectVisible();
     BOOL shown = csOverlay.superview != nil;
@@ -1026,6 +1106,7 @@ static void csTestNote(CFNotificationCenterRef c, void *o, CFStringRef n, const 
 static void csNoteVC(UIViewController *vc, BOOL appear) {
     NSString *cn = NSStringFromClass(vc.class);
     if ([cn rangeOfString:@"Switcher" options:NSCaseInsensitiveSearch].location == NSNotFound) return;
+    if ([cn isEqualToString:@"SBMainSwitcherViewController"] || [cn isEqualToString:@"SBFluidSwitcherViewController"]) csHookVis = appear ? 1 : 0;
     csLog(@"VC %@: %@", appear ? @"appear" : @"disappear", cn);
 }
 
@@ -1050,6 +1131,8 @@ static void csNoteVC(UIViewController *vc, BOOL appear) {
     if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.apple.springboard"]) return;
     dispatch_async(dispatch_get_main_queue(), ^{
         CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL, csTestNote, CS_TEST_NOTE, NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
-        [NSTimer scheduledTimerWithTimeInterval:0.3 repeats:YES block:^(NSTimer *t) { csTick(); }];
+        NSTimer *tm = [NSTimer timerWithTimeInterval:0.3 repeats:YES block:^(NSTimer *t) { csTick(); }];
+        [NSRunLoop.mainRunLoop addTimer:tm forMode:NSRunLoopCommonModes];
+        csLog(@"timer + darwin observer installed");
     });
 }
