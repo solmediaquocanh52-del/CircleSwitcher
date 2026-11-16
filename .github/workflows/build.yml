@@ -16,11 +16,6 @@ jobs:
         run: |
           git clone --recursive --depth=1 https://github.com/roothide/theos.git $HOME/theos-roothide
           cp -R /tmp/sdks/*.sdk $HOME/theos-roothide/sdks/
-      - name: Build rootful
-        run: |
-          export PATH="$(brew --prefix make)/libexec/gnubin:$PATH"
-          export THEOS=$HOME/theos
-          make clean package FINALPACKAGE=1
       - name: Build rootless
         run: |
           export PATH="$(brew --prefix make)/libexec/gnubin:$PATH"
@@ -31,7 +26,14 @@ jobs:
           export PATH="$(brew --prefix make)/libexec/gnubin:$PATH"
           export THEOS=$HOME/theos-roothide
           make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide
+      - name: Build rootful
+        continue-on-error: true
+        run: |
+          export PATH="$(brew --prefix make)/libexec/gnubin:$PATH"
+          export THEOS=$HOME/theos
+          make clean package FINALPACKAGE=1
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: debs
           path: packages/*.deb
