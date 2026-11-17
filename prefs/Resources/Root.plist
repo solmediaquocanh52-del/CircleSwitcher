@@ -248,7 +248,7 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>footerText</key>
-			<string>Kiểu 1: vòng phẳng, app đang chọn ở đỉnh, bong bóng ở giữa (ảnh mẫu 1). Kiểu 2: vòng nghiêng 3D, app đang chọn to ở giữa (ảnh mẫu 2). Kiểu 3: thẻ chữ nhật như bản cũ.</string>
+			<string>Kiểu 1: vòng phẳng, app đang chọn ở đỉnh, bong bóng ở giữa (ảnh mẫu 1). Kiểu 2: vòng nghiêng 3D, app đang chọn to ở giữa (ảnh mẫu 2). Kiểu 3: thẻ chữ nhật như bản cũ. Kiểu 4: dải thẻ dọc bo góc có viền phát sáng, thẻ giữa to, thẻ hai bên nhỏ và nghiêng vào trong (video mẫu).</string>
 			<key>label</key>
 			<string>Kiểu hiển thị (giống ảnh mẫu)</string>
 		</dict>
@@ -270,12 +270,14 @@
 				<string>Vòng phẳng (ảnh 1)</string>
 				<string>Vòng nghiêng 3D (ảnh 2)</string>
 				<string>Thẻ chữ nhật (cũ)</string>
+				<string>Dải thẻ 3D phát sáng (video)</string>
 			</array>
 			<key>validValues</key>
 			<array>
 				<integer>0</integer>
 				<integer>1</integer>
 				<integer>2</integer>
+				<integer>3</integer>
 			</array>
 		</dict>
 		<dict>
@@ -433,6 +435,134 @@
 			<real>10.0</real>
 			<key>min</key>
 			<real>0.0</real>
+			<key>showValue</key>
+			<true/>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>Dải thẻ phát sáng: độ bo góc thẻ</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSliderCell</string>
+			<key>default</key>
+			<real>28.0</real>
+			<key>defaults</key>
+			<string>com.vn.circleswitcher</string>
+			<key>key</key>
+			<string>cardCorner</string>
+			<key>max</key>
+			<real>60.0</real>
+			<key>min</key>
+			<real>8.0</real>
+			<key>showValue</key>
+			<true/>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>Dải thẻ phát sáng: cường độ viền sáng (%)</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSliderCell</string>
+			<key>default</key>
+			<real>70.0</real>
+			<key>defaults</key>
+			<string>com.vn.circleswitcher</string>
+			<key>key</key>
+			<string>glowAmt</string>
+			<key>max</key>
+			<real>100.0</real>
+			<key>min</key>
+			<real>0.0</real>
+			<key>showValue</key>
+			<true/>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>Dải thẻ phát sáng: khoảng cách giữa các thẻ (%)</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSliderCell</string>
+			<key>default</key>
+			<real>100.0</real>
+			<key>defaults</key>
+			<string>com.vn.circleswitcher</string>
+			<key>key</key>
+			<string>gap</string>
+			<key>max</key>
+			<real>160.0</real>
+			<key>min</key>
+			<real>60.0</real>
+			<key>showValue</key>
+			<true/>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>Motion blur khi xoay (0 = tắt, máy yếu nên để thấp)</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSliderCell</string>
+			<key>default</key>
+			<real>3.0</real>
+			<key>defaults</key>
+			<string>com.vn.circleswitcher</string>
+			<key>key</key>
+			<string>moveBlur</string>
+			<key>max</key>
+			<real>10.0</real>
+			<key>min</key>
+			<real>0.0</real>
+			<key>showValue</key>
+			<true/>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>Hiệu ứng bung ra khi mở/đóng switcher</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.vn.circleswitcher</string>
+			<key>key</key>
+			<string>openAnim</string>
+			<key>label</key>
+			<string>Bật hiệu ứng bung ra</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>Tốc độ bung (%)</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSliderCell</string>
+			<key>default</key>
+			<real>100.0</real>
+			<key>defaults</key>
+			<string>com.vn.circleswitcher</string>
+			<key>key</key>
+			<string>openSpeed</string>
+			<key>max</key>
+			<real>250.0</real>
+			<key>min</key>
+			<real>40.0</real>
 			<key>showValue</key>
 			<true/>
 		</dict>
