@@ -3,7 +3,7 @@
 #import <Preferences/PSListController.h>
 #import <Preferences/PSSpecifier.h>
 #import <objc/runtime.h>
-#import "../CSRing.h"
+#import "../CSRingV2.h"
 
 #define CS_DOMAIN CFSTR("com.vn.circleswitcher")
 
