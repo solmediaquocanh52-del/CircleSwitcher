@@ -40,6 +40,8 @@ typedef struct {
     int count, namePos, mode, style;
     double radius, tilt, cam, blur, size, off, bubSize;
     double iconSize, centerSize, dim, bgBlur, glowHue;
+    double gap, cardCorner, glowAmt, moveBlur, openSpeed;
+    BOOL openAnim;
 } CSCfg;
 static CSCfg C;
 
@@ -69,7 +71,7 @@ static void loadCfg(void) {
     C.off = prefDouble(CFSTR("off"), 0);
     C.bubSize = prefDouble(CFSTR("bubSize"), 56);
     C.style = (int)prefDouble(CFSTR("style"), 1);
-    if (C.style < 0 || C.style > 2) C.style = 1;
+    if (C.style < 0 || C.style > 3) C.style = 1;
     C.ringGlow = prefBool(CFSTR("ringGlow"), YES);
     C.namePill = prefBool(CFSTR("namePill"), NO);
     C.snapCircle = prefBool(CFSTR("snapCircle"), YES);
@@ -79,12 +81,18 @@ static void loadCfg(void) {
     C.dim = prefDouble(CFSTR("dim"), 35);
     C.bgBlur = prefDouble(CFSTR("bgBlur"), 10);
     C.glowHue = prefDouble(CFSTR("glowHue"), 225);
+    C.gap = prefDouble(CFSTR("gap"), 100);
+    C.cardCorner = prefDouble(CFSTR("cardCorner"), 28);
+    C.glowAmt = prefDouble(CFSTR("glowAmt"), 70);
+    C.moveBlur = prefDouble(CFSTR("moveBlur"), 3);
+    C.openSpeed = prefDouble(CFSTR("openSpeed"), 100);
+    C.openAnim = prefBool(CFSTR("openAnim"), YES);
 }
 
 static CSRingCfg csCfg(void) {
     CSRingCfg c;
     c.radius = C.radius; c.tilt = C.tilt; c.cam = C.cam; c.size = C.size; c.off = C.off; c.count = C.count;
-    c.style = C.style; c.iconSize = C.iconSize; c.centerSize = C.centerSize;
+    c.style = C.style; c.iconSize = C.iconSize; c.centerSize = C.centerSize; c.gap = C.gap;
     return c;
 }
 
@@ -360,7 +368,7 @@ static NSAttributedString *labelFor(CSItem *it) {
 @property (nonatomic, strong) id blurFilter;
 @property (nonatomic, assign) CGRect hit;
 @property (nonatomic, assign) CGFloat zv;
-@property (nonatomic, assign) BOOL circle;
+@property (nonatomic, assign) BOOL circle, neon;
 - (void)configure:(CSItem *)it showIcon:(BOOL)on;
 - (void)setBlur:(double)r;
 - (void)setGlow:(double)k;
@@ -402,18 +410,20 @@ static NSAttributedString *labelFor(CSItem *it) {
     CGFloat s = bw * (self.circle ? 0.62 : 0.56);
     self.icon.frame = CGRectMake((bw - s) / 2, (self.bounds.size.height - s) / 2, s, s);
     self.icon2.frame = self.icon.frame;
-    CGFloat cr = self.circle ? bw / 2 : 18;
+    CGFloat cr = self.circle ? bw / 2 : (self.neon ? C.cardCorner : 18);
     self.front.layer.cornerRadius = cr; self.back.layer.cornerRadius = cr;
     self.icon.layer.cornerRadius = self.circle ? s * 0.225 : 12;
-    self.front.layer.borderWidth = self.circle ? 1.6 : 0.5;
-    self.front.layer.borderColor = [UIColor colorWithWhite:1 alpha:self.circle ? 0.65 : 0.25].CGColor;
+    self.front.layer.borderWidth = self.circle ? 1.6 : (self.neon ? 2.0 : 0.5);
+    UIColor *nb = [UIColor colorWithHue:fmod(C.glowHue, 360.0) / 360.0 saturation:0.45 brightness:1 alpha:0.9];
+    self.front.layer.borderColor = (self.neon ? nb : [UIColor colorWithWhite:1 alpha:self.circle ? 0.65 : 0.25]).CGColor;
     if (self.circle) self.layer.shadowPath = [UIBezierPath bezierPathWithOvalInRect:self.bounds].CGPath;
+    else if (self.neon) self.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:self.bounds cornerRadius:cr].CGPath;
 }
 - (void)setGlow:(double)k {
-    if (!self.circle || !C.ringGlow) { self.layer.shadowOpacity = 0; return; }
+    if ((!self.circle && !self.neon) || !C.ringGlow) { self.layer.shadowOpacity = 0; return; }
     UIColor *g = [UIColor colorWithHue:fmod(C.glowHue, 360.0) / 360.0 saturation:0.55 brightness:1 alpha:1];
     self.layer.shadowColor = g.CGColor; self.layer.shadowOffset = CGSizeZero;
-    self.layer.shadowRadius = 8 + 10 * k; self.layer.shadowOpacity = (float)(0.25 + 0.65 * k);
+    self.layer.shadowRadius = 8 + 10 * k; self.layer.shadowOpacity = (float)((0.25 + 0.65 * k) * (self.neon ? C.glowAmt / 100.0 : 1.0));
 }
 - (void)setBlur:(double)r {
     @try {
@@ -567,7 +577,7 @@ static void csAddBubble(CSItem *it, CGPoint from) {
 @property (nonatomic, strong) NSMutableArray<CSItem *> *items;
 @property (nonatomic, strong) UIButton *xBtn, *cleanBtn, *exitBtn;
 @property (nonatomic, strong) UILabel *emptyLabel, *toastLabel;
-@property (nonatomic, assign) double rot, vel, from, to, t, dragY;
+@property (nonatomic, assign) double rot, vel, from, to, t, dragY, lastRot;
 @property (nonatomic, assign) int anim;
 @property (nonatomic, assign) NSInteger front, panMode;
 @property (nonatomic, copy) NSString *prevBID, *startBID;
@@ -667,7 +677,7 @@ static BOOL csForceHidden;
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGFloat W = self.bounds.size.width, H = self.bounds.size.height;
-    if (C.style != 2) {
+    if (C.style <= 1) {
         self.xBtn.bounds = CGRectMake(0, 0, 170, 46);   // thanh kinh dang vien thuoc giong anh mau 2
         self.xBtn.center = CGPointMake(W / 2, H - 92);
         self.cleanBtn.center = CGPointMake(W / 2 - 124, H - 92);
@@ -733,9 +743,9 @@ static BOOL csForceHidden;
     for (UIView *v in self.labels) [v removeFromSuperview];
     [self.cards removeAllObjects]; [self.labels removeAllObjects];
     for (CSItem *it in self.items) {
-        BOOL circ = C.style != 2;
+        BOOL circ = C.style <= 1;
         CSCard *c = [[CSCard alloc] initWithFrame:circ ? CGRectMake(0, 0, 100, 100) : CGRectMake(0, 0, 110, 186)];
-        c.circle = circ;
+        c.circle = circ; c.neon = (C.style == 3);
         [c configure:it showIcon:C.icon];
         [self.ring addSubview:c]; [self.cards addObject:c];
         CSLabel *l = [CSLabel new];
@@ -753,7 +763,7 @@ static BOOL csForceHidden;
     CGFloat W = self.bounds.size.width, H = self.bounds.size.height;
     NSUInteger n = self.items.count;
     CGFloat total = n * 10 - 4;
-    self.dotsView.frame = CGRectMake((W - total) / 2, H - (C.style == 2 ? 125 : 150), total, 6);
+    self.dotsView.frame = CGRectMake((W - total) / 2, H - (C.style >= 2 ? 125 : 150), total, 6);
     self.dotsView.hidden = !C.dots || n == 0;
     for (NSUInteger i = 0; i < n; i++) {
         UIView *d = [[UIView alloc] initWithFrame:CGRectMake(i * 10, 0, 6, 6)];
@@ -775,7 +785,7 @@ static BOOL csForceHidden;
 
 - (void)relayout {
     [self applyBackground];
-    BOOL circ = C.style != 2;
+    BOOL circ = C.style <= 1;
     if (!circ) {
         self.glowRing.hidden = YES; self.bubble.hidden = YES; self.chev.hidden = YES;
         [self relayoutCards];
@@ -877,11 +887,17 @@ static BOOL csForceHidden;
     self.ring.layer.sublayerTransform = persp;
     double step = [self step], e = C.cam * M_PI / 180.0;
     CGFloat w = 110 * C.size / 100.0, h = 186 * C.size / 100.0;
+    BOOL neon = C.style == 3;
+    double gm = neon ? C.gap / 100.0 : 1.0;
+    double spd = fabs(self.rot - self.lastRot); self.lastRot = self.rot;
+    double mblur = neon ? C.moveBlur * MIN(1.0, spd / MAX(step * 0.2, 0.5)) : 0;
     double best = 1e9; NSInteger front = -1;
     NSMutableArray *order = [NSMutableArray array];
     for (NSInteger i = 0; i < n; i++) {
         CSCard *card = self.cards[i]; CSLabel *lb = self.labels[i];
-        double phi = normDeg(i * step - self.rot), r = phi * M_PI / 180.0;
+        double phi = normDeg(i * step - self.rot), r = phi * gm * M_PI / 180.0;
+        double kk = CSClamp(1.0 - fabs(phi) / MAX(step, 1.0), 0, 1), ks = kk * kk * (3.0 - 2.0 * kk);
+        double fsc = neon ? 0.80 + 0.30 * ks : 1.0;
         double x = C.radius * sin(r), depth = C.radius * cos(r) - C.radius;
         double z = depth * cos(e), y = depth * sin(e);
         if (i == self.front && self.dragY != 0) y += self.dragY;
@@ -893,15 +909,17 @@ static BOOL csForceHidden;
         CATransform3D t = CATransform3DIdentity;
         t = CATransform3DTranslate(t, x, y, z);
         t = CATransform3DRotate(t, yaw, 0, 1, 0);
+        if (neon) t = CATransform3DScale(t, fsc, fsc, 1);
         card.layer.transform = t;
         double op = 0.4 + 0.6 * (cos(r) + 1) / 2;
         if (i == self.front && self.dragY < 0) op *= MAX(0.2, 1 + self.dragY / 220.0);
         card.alpha = op;
-        double bl = C.blur * MIN(1.0, fabs(phi) / 90.0) + (C.namePos == 1 ? 1.5 : 0);
+        double bl = C.blur * MIN(1.0, fabs(phi) / 90.0) + (C.namePos == 1 ? 1.5 : 0) + mblur;
         [card setBlur:bl];
+        [card setGlow:ks];
         card.front.hidden = back; card.back.hidden = !back;
         double px = cx + x * s, py = cy + y * s;
-        double hw = (w * s / 2) * MAX(fabs(cos(yaw)), 0.25), hh = h * s / 2;
+        double hw = (w * fsc * s / 2) * MAX(fabs(cos(yaw)), 0.25), hh = h * fsc * s / 2;
         card.hit = CGRectMake(px - hw, py - hh, hw * 2, hh * 2); card.zv = z;
         [order addObject:card];
         BOOL show = C.namePos != 3 && !(C.onlyFront && fabs(phi) > 20);
@@ -1153,7 +1171,18 @@ static void csShowOverlay(BOOL test) {
         [csRoot.view addSubview:csOverlay];
     }
     [csOverlay reloadItems];
-    [UIView animateWithDuration:0.2 animations:^{ csOverlay.alpha = 1; }];
+    if (C.openAnim) {
+        double sp = CSClamp(C.openSpeed, 40, 250) / 100.0;
+        csOverlay.ring.transform = CGAffineTransformMakeScale(0.35, 0.35);
+        csOverlay.labelHost.alpha = 0;
+        [UIView animateWithDuration:0.55 / sp delay:0 usingSpringWithDamping:0.78 initialSpringVelocity:0.6
+                            options:UIViewAnimationOptionAllowUserInteraction | UIViewAnimationOptionBeginFromCurrentState
+                         animations:^{ csOverlay.ring.transform = CGAffineTransformIdentity; csOverlay.alpha = 1; } completion:nil];
+        [UIView animateWithDuration:0.3 / sp delay:0.12 / sp options:0 animations:^{ csOverlay.labelHost.alpha = 1; } completion:nil];
+    } else {
+        csOverlay.ring.transform = CGAffineTransformIdentity; csOverlay.labelHost.alpha = 1;
+        [UIView animateWithDuration:0.2 animations:^{ csOverlay.alpha = 1; }];
+    }
     for (UIView *b in csBubbles) [csRoot.view bringSubviewToFront:b];
     csShownAt = [NSDate date];
     csLog(@"overlay shown (test=%d)", test);
@@ -1162,7 +1191,10 @@ static void csShowOverlay(BOOL test) {
 static void csHideOverlay(void) {
     if (!csOverlay || !csOverlay.superview) return;
     CSOverlay *o = csOverlay;
-    [UIView animateWithDuration:0.18 animations:^{ o.alpha = 0; } completion:^(BOOL f) { if (o.alpha == 0) [o removeFromSuperview]; }];
+    double sp = CSClamp(C.openSpeed, 40, 250) / 100.0;
+    [UIView animateWithDuration:0.2 / sp delay:0 options:UIViewAnimationOptionBeginFromCurrentState animations:^{
+        o.alpha = 0; if (C.openAnim) o.ring.transform = CGAffineTransformMakeScale(0.6, 0.6);
+    } completion:^(BOOL f) { if (o.alpha == 0) { [o removeFromSuperview]; o.ring.transform = CGAffineTransformIdentity; } }];
     csLog(@"overlay hidden");
 }
 
@@ -1474,6 +1506,20 @@ static void csSetCircleMask(UIView *c, BOOL on) {
     L.mask = mine;
 }
 
+static const void *kNeon = &kNeon;
+static void csSetNeon(UIView *c, BOOL on, double k) {
+    CALayer *L = c.layer;
+    if (!on) {
+        if ([objc_getAssociatedObject(c, kNeon) boolValue]) { L.shadowOpacity = 0; objc_setAssociatedObject(c, kNeon, @NO, OBJC_ASSOCIATION_RETAIN_NONATOMIC); }
+        return;
+    }
+    UIColor *g = [UIColor colorWithHue:fmod(C.glowHue, 360.0) / 360.0 saturation:0.55 brightness:1 alpha:1];
+    L.shadowColor = g.CGColor; L.shadowOffset = CGSizeZero;
+    L.shadowRadius = 10 + 14 * k; L.shadowOpacity = (float)((0.2 + 0.7 * k) * C.glowAmt / 100.0);
+    L.shadowPath = [UIBezierPath bezierPathWithRoundedRect:c.bounds cornerRadius:C.cardCorner].CGPath;
+    objc_setAssociatedObject(c, kNeon, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
 static void csHideHead(UIView *h, BOOL hide) {
     BOOL was = [objc_getAssociatedObject(h, kHid) boolValue];
     if (hide && !was) { h.hidden = YES; objc_setAssociatedObject(h, kHid, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC); }
@@ -1505,6 +1551,7 @@ static void csShowName(NSString *t, CGPoint c) {
 static void csRestore(UIView *c, CSSys s) {
     if (![objc_getAssociatedObject(c, kApplied) boolValue]) return;
     csSetCircleMask(c, NO);
+    csSetNeon(c, NO, 0);
     CALayer *L = c.layer;
     L.position = s.pos; L.transform = s.t; L.opacity = (float)s.op; L.zPosition = 0; L.doubleSided = YES;
     objc_setAssociatedObject(c, kApplied, @NO, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -1594,13 +1641,13 @@ static void csDeckLayout(UIViewController *vc) {
                 spacing = clampd(spacing, W * 0.25, W * 1.2);
                 double frac = (sy[order[ctr]].scr.x - W / 2) / spacing;
                 double step = 360.0 / MAX(3, MAX(C.count, m));
-                CSRingCfg cfg = csCfg(); BOOL circ = C.style != 2; int frontIdx = -1;
+                CSRingCfg cfg = csCfg(); BOOL circ = C.style <= 1; int frontIdx = -1;
                 for (int j = 0; j < m; j++) {
                     int i = order[j]; UIView *c = cards[i];
                     double k = clampd((0.85 - ssc[i]) / 0.25, 0, 1);
                     if (k < 0.001) { csRestore(c, sy[i]); continue; }
                     double phi = normDeg(((j - ctr) + frac) * step);
-                    CSPose p = circ ? CSRingPoseCircle(phi, step, cfg, W) : CSRingPose(phi, cfg);
+                    CSPose p = circ ? CSRingPoseCircle(phi, step, cfg, W) : (C.style == 3 ? CSRingPoseStrip(phi, step, cfg) : CSRingPose(phi, cfg));
                     double scale = ssc[i] + (p.scale - ssc[i]) * k;
                     double f = scale * W / bw[i];
                     CGPoint scr = CGPointMake(sy[i].scr.x + (W / 2 + p.x - sy[i].scr.x) * k, sy[i].scr.y + p.y * k);
@@ -1616,6 +1663,7 @@ static void csDeckLayout(UIViewController *vc) {
                     L.zPosition = p.z * k;
                     L.doubleSided = cos(p.yaw * k) >= 0;
                     csSetCircleMask(c, circ && C.snapCircle && k > 0.5);
+                    csSetNeon(c, C.style == 3 && C.ringGlow && k > 0.05, p.k * k);
                     csStamp(c);
                     if (j == ctr) frontIdx = i;
                     csLastApply = CACurrentMediaTime(); csDeckApplied++;

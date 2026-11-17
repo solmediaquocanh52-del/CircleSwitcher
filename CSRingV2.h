@@ -8,7 +8,7 @@ typedef struct {
     double radius, tilt, cam, size, off;
     int count;
     int style;
-    double iconSize, centerSize;
+    double iconSize, centerSize, gap;
 } CSRingCfg;
 
 typedef struct {
@@ -28,7 +28,7 @@ static inline double CSClamp(double v, double a, double b) { return v < a ? a : 
 static inline CSRingCfg CSRingDefaults(void) {
     CSRingCfg c;
     c.radius = 120; c.tilt = 35; c.cam = 22; c.size = 100; c.off = 0; c.count = 8;
-    c.style = 1; c.iconSize = 100; c.centerSize = 100;
+    c.style = 1; c.iconSize = 100; c.centerSize = 100; c.gap = 100;
     return c;
 }
 
@@ -48,6 +48,16 @@ static inline CSPose CSRingPose(double phi, CSRingCfg c) {
     p.opacity = 0.4 + 0.6 * (cos(r) + 1.0) / 2.0;
     p.perspective = P;
     p.dia = 0; p.k = 0;
+    return p;
+}
+
+// Kieu 3: dai the 3D phat sang (the chu nhat, the giua to, 2 ben nho va nghieng). gap = khoang cach (%)
+static inline CSPose CSRingPoseStrip(double phi, double step, CSRingCfg c) {
+    CSPose p = CSRingPose(phi * c.gap / 100.0, c);
+    double k = CSClamp(1.0 - fabs(phi) / CSMaxD(step, 1.0), 0, 1);
+    double ks = k * k * (3.0 - 2.0 * k);
+    p.k = ks;
+    p.scale *= (0.80 + 0.30 * ks);
     return p;
 }
 
