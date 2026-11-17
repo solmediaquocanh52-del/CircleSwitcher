@@ -121,7 +121,8 @@ static const double kScreenW = 390.0, kScreenH = 844.0, kU = 0.30; // ti le thu 
     c.off = csPref(@"off", d.off, over);
     c.count = (int)lround(csPref(@"count", d.count, over));
     c.style = (int)csPref(@"style", d.style, over);
-    if (c.style < 0 || c.style > 2) c.style = 1;
+    if (c.style < 0 || c.style > 3) c.style = 1;
+    c.gap = csPref(@"gap", d.gap, over);
     c.iconSize = csPref(@"iconSize", d.iconSize, over);
     c.centerSize = csPref(@"centerSize", d.centerSize, over);
     self.glowOn = csPref(@"ringGlow", 1, over) != 0;
@@ -134,7 +135,7 @@ static const double kScreenW = 390.0, kScreenH = 844.0, kU = 0.30; // ti le thu 
 // Giong het phan xep vong trong Tweak.x: phi = ((j - ctr) + frac) * step, pose = CSRingPose
 - (void)relayout {
     int N = 7, ctr = 3;
-    BOOL circ = self.cfg.style != 2;
+    BOOL circ = self.cfg.style <= 1, neon = self.cfg.style == 3;
     double step = 360.0 / MAX(3, MAX(self.cfg.count, N));
     double frac = fmod(self.phase, 1.0); if (frac < 0) frac += 1.0; if (frac > 0.5) frac -= 1.0;
     int shift = (int)floor(self.phase + 0.5);
@@ -146,11 +147,13 @@ static const double kScreenW = 390.0, kScreenH = 844.0, kU = 0.30; // ti le thu 
         double rel = rank - ctr;
         double phi = fmod(((rel) + frac) * step + 540.0, 360.0) - 180.0;
         CSRingCfg cfg = self.cfg; if (cfg.count < N) cfg.count = N;
-        CSPose p = circ ? CSRingPoseCircle(phi, step, cfg, kScreenW) : CSRingPose(phi, cfg);
+        CSPose p = circ ? CSRingPoseCircle(phi, step, cfg, kScreenW) : (neon ? CSRingPoseStrip(phi, step, cfg) : CSRingPose(phi, cfg));
         c.hidden = NO;
         double bw = circ ? 100 * kU : kScreenW * kU, bh = circ ? 100 * kU : kScreenH * kU;
         c.bounds = CGRectMake(0, 0, bw, bh);
-        c.layer.cornerRadius = circ ? bw / 2 : 40 * kU;
+        c.layer.cornerRadius = circ ? bw / 2 : (neon ? csPref(@"cardCorner", 28, nil) * kU : 40 * kU);
+        c.layer.borderWidth = neon ? 1.5 : 0; c.layer.borderColor = [UIColor colorWithRed:0.5 green:0.95 blue:1 alpha:0.9].CGColor;
+        if (neon) { c.layer.shadowColor = [UIColor colorWithRed:0.4 green:0.9 blue:1 alpha:1].CGColor; c.layer.shadowOpacity = (float)(0.3 + 0.6 * p.k); c.layer.shadowOffset = CGSizeZero; } else c.layer.shadowOpacity = 0.35;
         c.layer.masksToBounds = circ;
         [c viewWithTag:77].hidden = circ;
         double sc = circ ? p.dia / 100.0 : p.scale;
@@ -249,7 +252,8 @@ static const CGFloat kPreviewH = 270;
     CSRingCfg d = CSRingDefaults();
     NSDictionary *vals = @{@"radius": @(d.radius), @"tilt": @(d.tilt), @"cam": @(d.cam), @"size": @(d.size),
                            @"off": @(d.off), @"count": @(d.count), @"namePos": @0, @"blur": @2,
-                           @"style": @(d.style), @"iconSize": @(d.iconSize), @"centerSize": @(d.centerSize)};
+                           @"style": @(d.style), @"iconSize": @(d.iconSize), @"centerSize": @(d.centerSize), @"gap": @(d.gap),
+                           @"cardCorner": @28, @"glowAmt": @70, @"moveBlur": @3, @"openSpeed": @100};
     for (NSString *k in vals)
         CFPreferencesSetAppValue((__bridge CFStringRef)k, (__bridge CFPropertyListRef)vals[k], CS_DOMAIN);
     CFPreferencesAppSynchronize(CS_DOMAIN);
