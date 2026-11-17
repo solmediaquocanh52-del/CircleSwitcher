@@ -6,7 +6,7 @@
 #import <signal.h>
 #import <dlfcn.h>
 #import <math.h>
-#import "CSRing.h"
+#import "CSRingV2.h"
 
 #define CS_DOMAIN CFSTR("com.vn.circleswitcher")
 #define CS_LOGFILE @"/var/mobile/Documents/CircleSwitcher.log"
